@@ -33,9 +33,12 @@ TODO:
 
 If you are having problems with this application it is handy to be able to run it in a terminal to see the output. To do this run the following commands:
 1. Stop the service:
+
 **service cywssh stop**
-2. Run it as an interactive program
+2. Run it as an interactive program:
+
 **python /usr/sbin/cywsshd.py**
 
 If the credentials in cywsshd.config changes, you can restart the service by using:
+
 **service cywssh restart**
