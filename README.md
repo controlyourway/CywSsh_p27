@@ -35,6 +35,7 @@ If you are having problems with this application it is handy to be able to run i
 1. Stop the service:
 
 **service cywssh stop**
+
 2. Run it as an interactive program:
 
 **python /usr/sbin/cywsshd.py**
