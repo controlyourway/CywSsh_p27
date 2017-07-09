@@ -2,6 +2,7 @@
 ### Python 2.7
 
 ##Introduction
+
 This application works with our terminal applications to give the user a Secure Shell interface over the internet using the Control Your Way service.
 It uses the linux user credentials to log in, as if you are directly connected to the device. Security is inforced in the following way:
 1. The only way to discover a ssh device is to know its discover password. 
@@ -11,6 +12,7 @@ on the network cannot see messaged sent to the ssh device. The correct client ke
 discarded.
 
 ##Install
+
 Clone or download the files and go to the directory where the files are located. Run the following command:
 **sudo ./setup-cywsshd.sh**
 You will be asked for the following details during installation:
