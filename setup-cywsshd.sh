@@ -23,12 +23,20 @@ read password
 echo -n "Enter your ControlYourWay network name and press [ENTER]: "
 read network
 
+echo -n "Enter a Discover password and press [ENTER]: "
+read discoverPassword
+
+echo -n "Enter the device name (name that will be returned when a discovery response is sent) and press [ENTER]: "
+read deviceName
+
 # create configuration file
 cat > /etc/cywsshd.config <<- EOM
 {
     "cywuser": "$username",
     "cywpass": "$password",
     "cywnetwork": "$network"
+	"discoverPassword": "$discoverPassword"
+	"deviceName": "$deviceName"
 }
 EOM
 

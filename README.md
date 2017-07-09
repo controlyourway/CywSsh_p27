@@ -2,12 +2,24 @@
 ### Python 2.7
 
 ##Introduction
-This application works with our terminal applications to give the user a Secure Shell interface over the network using the Control Your Way service.
+This application works with our terminal applications to give the user a Secure Shell interface over the internet using the Control Your Way service.
+It uses the linux user credentials to log in, as if you are directly connected to the device. Security is inforced in the following way:
+1. The only way to discover a ssh device is to know its discover password. 
+2. The ssh device will only respond to your session ID, other devices connected to the same network will not see any data returned by the ssh device.
+3. As part of the discovery response a cleint key will be returned. The client must send all messages to the session ID of the ssh device so that other devices
+on the network cannot see messaged sent to the ssh device. The correct client key must be sent with all messages to the ssh device, otherwise the message will be
+discarded.
 
 ##Install
 Clone or download the files and go to the directory where the files are located. Run the following command:
 **sudo ./setup-cywsshd.sh**
-You will be asked for your CYW username/password/network name during installation.
+You will be asked for the following details during installation:
+1. CYW username
+2. CYW password
+3. CYW network name
+4. Discover password, this is the password that must be sent with a discovery message for this device to share its details.
+5. Device name, when the password sent with the discover message matches the Discover password then this application will respond with the device name and the session ID.
+
 These are stored in plaintext in /etc/cywsshd.config
 
 Once this is done, the service should be installed, and running.
