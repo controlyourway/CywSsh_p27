@@ -37,7 +37,7 @@ USAGE:
 Connect to your CYW network using one of your clients, and enter "session:XXX" into the data-type, where XXX is any random key of your choosing. This must stay the same during your terminal session. Hit SEND with any message (the message data does not matter for the first request).
 The terminal server will not recognize it at first, so it will prompt for a login.
 
-Logs are stored in /etc/cywsshd.log
+Rolling logs are stored in /var/log/cywsshd.log
 
 TODO:
 1.	more code comments/logging
