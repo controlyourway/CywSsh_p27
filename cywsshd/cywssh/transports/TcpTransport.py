@@ -1,7 +1,9 @@
 import socket
 from thread import *
 from ..client import *
+import logging
 
+logger = logging.getLogger('cywsshd')
 
 class TcpTransport:
     __ssocket = None
@@ -26,7 +28,7 @@ class TcpTransport:
     def __run(self):
         while not False:#self.__stop:
             conn, addr = self.__ssocket.accept()
-            new_client = client(self.__server, TcpTransport.TcpIO(conn), addr)
+            new_client = client(self.__server, TcpTransport.IO(conn), addr)
             self.__server.add_client(new_client)
             new_client.start()        
             
@@ -34,7 +36,7 @@ class TcpTransport:
         try:
             self.__socket.sendall(line)
         except socket.error:
-            pass
+            logger.error(traceback.format_exc())
         
     def close(self):
         try:
@@ -43,7 +45,7 @@ class TcpTransport:
         except socket.error:
             pass
 
-    class TcpIO:
+    class IO:
         def __init__(self, csocket):
             self.__csocket = csocket
             self.reader = self.__csocket.makefile('r', 0)

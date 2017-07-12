@@ -32,11 +32,12 @@ read deviceName
 # create configuration file
 cat > /etc/cywsshd.config <<- EOM
 {
+    "transports": ["TCP", "CYW"],
     "cywuser": "$username",
     "cywpass": "$password",
     "cywnetwork": "$network"
-	"discoverPassword": "$discoverPassword"
-	"deviceName": "$deviceName"
+    "discoverPassword": "$discoverPassword"
+    "deviceName": "$deviceName"
 }
 EOM
 

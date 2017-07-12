@@ -1,17 +1,11 @@
-from thread import *
-import pwd
-import spwd
 import crypt
-import time
-from subprocess import Popen, PIPE
-import sys
-import os
-import pty
-import tty
-from select import select
-import platform
-from virtualterminal import *
 import logging
+import os
+import spwd
+import time
+
+from thread import *
+from virtualterminal import *
 
 logger = logging.getLogger('cywsshd')
 
@@ -23,8 +17,49 @@ class client:
     __username = ''
     __session_id = ''
     
+    def __init__(self, server, io, session_id):
+        self.__server = server
+        self.__io = io
+        self.session_id = session_id
+        self.__spawn_time = os.times()[4]
+        self.__terminal = virtualterminal(self)
+
+    """ Starts the worker's threads
+    """
+    def start(self):
+        start_new_thread(self.__run, ())
+
+    """ Stops the worker's threads
+    """
+    def stop(self):
+        print 'client asking terminal to stop'
+        self.__terminal.stop()
+        self.__io.close()
+        self.__conn = None
+        
+    """ The body of this worker
+    """
+    def __run(self):
+        try:
+            try:
+                if self.__authenticate():
+                    logger.info('Entering terminal session for user (%s).' % self.__username)
+                    self.__terminal.start().wait() # wait for client or server to break connection
+                    
+                    logger.info('Exited terminal session for user (%s).' % self.__username)
+                else:
+                    logger.warn('Authentication failed for session (%s).' % self.session_id)
+            except:
+                logger.error(traceback.format_exc())
+            
+            self.__io.close()
+            self.__server.remove_client(self)
+        except:
+            logger.error(traceback.format_exc())
+
     def get_io(self):
         return self.__io
+        
     def get_username(self):
         return self.__username
         
@@ -33,23 +68,6 @@ class client:
         
     def write(self, message):
         self.__terminal.write(message)
-    
-    def __init__(self, server, io, session_id):
-        self.__server = server
-        self.__io = io
-        self.session_id = session_id
-        self.__server.add_client(self)
-        self.__spawn_time = os.times()[4]
-        self.__terminal = virtualterminal(self)
-
-    def __run(self):
-        if self.__authenticate():
-            logger.info('Entering terminal session for user (%s).' % self.__username)
-            self.__terminal.start().wait() # wait for client or server to break connection
-            
-            print 'Exited terminal session for user (%s).' % self.__username
-        self.__io.close()
-        self.__server.remove_client(self)
         
     def __request_username(self):
         attempt = 0
@@ -116,19 +134,13 @@ class client:
                         logger.info('Client password for user (%s) correct.' % self.__username)
                         # successful auth
                         self.__is_authenticated = True
-                    elif attempt < MAX_AUTH_ATTEMPTS:
+                    else:
                         logger.info('Client password for user (%s) incorrect.' % self.__username)
-                        time.sleep(3)
-                        self.__io.write('Permission denied, please try again.\n')
+                        #time.sleep(3)
+                        if attempt < MAX_AUTH_ATTEMPTS:
+                            self.__io.write('Permission denied, please try again.\n')
+                        else:
+                            self.__io.write('Permission denied.\n')
 
                 break
         return self.__is_authenticated
-        
-    def start(self):
-        start_new_thread(self.__run, ())
-
-    def stop(self):
-        print 'client asking terminal to stop'
-        self.__terminal.stop()
-        self.__io.close()
-        self.__conn = None

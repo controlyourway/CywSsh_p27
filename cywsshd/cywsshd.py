@@ -40,14 +40,22 @@ if not os.path.isfile('/etc/cywsshd.config'):
 with open('/etc/cywsshd.config') as json_data:
     cfg = json.load(json_data)
     
-server = terminalserver()#'', 8081)
+server = server()
 
-# enable telnet as a physical transport layer
-server.add_transport(TcpTransport(server, '', 8081))
-
-# enable CYW as a physical transport layer
-server.add_transport(CywTransport(server, cfg['cywuser'], cfg['cywpass'], cfg['cywnetwork']))
-
+if "transports" in cfg:
+    if "transports" in cfg and "TCP" in cfg["transports"]:
+        # enable telnet as a physical transport layer
+        logger.info("Constructing and registering TCP transport")
+        server.add_transport(TcpTransport(server, '', 8081))
+    
+    if "transports" in cfg and "CYW" in cfg["transports"]:
+        # enable CYW as a physical transport layer
+        logger.info("Constructing and registering CYW transport")
+        server.add_transport(CywTransport(server, cfg['cywuser'], cfg['cywpass'], cfg['cywnetwork']))
+else:
+    logger.error('No transports have been configured. Re-run setup')
+    sys.exit(-1)
+    
 if not server.start():
     sys.exit()
 
@@ -55,5 +63,3 @@ try:
     signal.pause()
 except KeyboardInterrupt:
     pass
-
-#server.stop()

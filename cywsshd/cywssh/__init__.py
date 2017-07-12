@@ -1,2 +1,2 @@
-from cywssh.terminalserver import terminalserver
+from cywssh.server import server
 import cywssh.transports

@@ -1,18 +1,16 @@
-from thread import *
-import pwd
-import spwd
-import crypt
-import time
-from subprocess import Popen, PIPE
-import sys
-import os
-import pty
-import tty
-from select import select
-import platform
-from threading import Event
 import logging
+import os
+import platform
+import pty
+import pwd
+import sys
 import traceback
+import tty
+
+from select import select
+from subprocess import Popen, PIPE
+from thread import *
+from threading import Event
 
 WELCOME_MESSAGE_PATH = '/etc/motd'
 
@@ -26,28 +24,21 @@ class virtualterminal:
         self.__manager = manager
         pass
     
-    def __write(self, text):
-        self.__manager.get_io().write(text)
-        
-    def write(self, message):
-        self.__write(self.__generate_promptstring())
-        self.pin.write(msg+'\n')
+    """ Starts the worker's threads
+    """
+    def start(self):
+        self.__print_welcome()
+        self.__spawn_shell_process()
+        return self.__evt_stopping
 
+    """ Stops the worker's threads
+    """
+    def stop(self):
+        self.__write('Terminating session...\n')
+        self.__stop = True 
         
-    def __generate_promptstring(self):
-        workdir = os.getcwd()
-        if workdir == os.getenv('HOME'):
-            workdir = "~"
-        return '%s@%s:%s# ' % (self.__manager.get_username(), platform.node(), workdir)    
-    
-    def __print_welcome(self):
-        if os.path.isfile(WELCOME_MESSAGE_PATH):
-            self.__write('\n')
-            with open(WELCOME_MESSAGE_PATH, "r") as welcome_file:
-                for line in welcome_file:
-                    self.__write(line)
-            self.__write('\n\n')
-            
+    """ The body of this worker
+    """
     def __run(self, process, pin):
         sock_reader = self.__manager.get_io().reader
         msg = ''
@@ -108,11 +99,10 @@ class virtualterminal:
         process.stdout.close()
         process.stderr.close()
         self.__evt_stopping.set()
-
-    def start(self):
-        self.__print_welcome()
         
-        # spawn child process
+    """ Spawns the Linux `sh` process, captures its pipes, and creates a thread for routing I/O
+    """
+    def __spawn_shell_process(self):
         cwd = '/bin/bash --norc'
         pw_record = pwd.getpwnam(self.__manager.get_username())
         user_name      = pw_record.pw_name
@@ -124,43 +114,53 @@ class virtualterminal:
         env[ 'LOGNAME'  ]  = user_name
         env[ 'PWD'      ]  = cwd
         env[ 'USER'     ]  = user_name
-        #args = [cwd]
-        #self.report_ids('starting ' + str(args))
-
-        logger.debug('Opening PTY for user %s' % pw_record.pw_name)
-        # open a virtual terminal
-        #master, slave = pty.openpty()
-        #slave, master = os.pipe()
 
         logger.debug('Spawning shell process for user %s' % pw_record.pw_name)
         process = Popen(
-            '/bin/sh', preexec_fn=self.demote(user_uid, user_gid), cwd=user_home_dir, env=env, stdin=PIPE, stdout=PIPE, stderr=PIPE
+            '/bin/sh', preexec_fn=self.__demote(user_uid, user_gid), cwd=user_home_dir, env=env, stdin=PIPE, stdout=PIPE, stderr=PIPE
         )
-        
-        #slave = process.stdin
-        
-        logger.debug('Getting PTY file-descriptor for user %s' % pw_record.pw_name)
+
         # grab a file descriptor for the virtual terminal, use this to send data to your virtual terminal
-        self.pin = process.stdin#os.fdopen(slave, 'w')
-        #tty.setcbreak(sys.stdin)
-        
-        logger.debug('Sending prompt stringfor user %s' % pw_record.pw_name)
+        self.pin = process.stdin
+
+        logger.debug('Sending prompt string for user %s' % pw_record.pw_name)
         self.__write(self.__generate_promptstring())
         
-        #result = process.wait()        
         start_new_thread(self.__run, (process, self.pin))
         
-        return self.__evt_stopping
+    """ Writes output to the client transport
+    """
+    def __write(self, text):
+        self.__manager.get_io().write(text)
         
-    def demote(self, user_uid, user_gid):
+    def write(self, message):
+        self.__write(self.__generate_promptstring())
+        self.pin.write(msg+'\n')
+        
+    """ Constructs a Linux-bash style command prompt
+    """
+    def __generate_promptstring(self):
+        workdir = os.getcwd()
+        if workdir == os.getenv('HOME'):
+            workdir = "~"
+        return '%s@%s:%s# ' % (self.__manager.get_username(), platform.node(), workdir)    
+    
+    """ Writes a welcome message to the client transport
+    """
+    def __print_welcome(self):
+        if os.path.isfile(WELCOME_MESSAGE_PATH):
+            self.__write('\n')
+            with open(WELCOME_MESSAGE_PATH, "r") as welcome_file:
+                for line in welcome_file:
+                    self.__write(line)
+            self.__write('\n\n')
+            
+        
+    """ Demote child process to target user and group.
+        This ensures Linux fs permissions will be honored.
+    """
+    def __demote(self, user_uid, user_gid):
         def result():
-            #self.report_ids('starting demotion')
             os.setgid(user_gid)
             os.setuid(user_uid)
-            #Popen('/usr/bin/whoami')
-            #self.report_ids('finished demotion')
         return result    
-        
-    def stop(self):
-        self.__write('Terminating session...\n')
-        self.__stop = True
