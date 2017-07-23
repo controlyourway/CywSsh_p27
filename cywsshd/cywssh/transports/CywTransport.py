@@ -22,11 +22,17 @@ class CywTransport:
         self.__cyw.set_network_names([self.__network])
         self.__cyw.set_connection_status_callback(self.connection_status_callback)
         self.__cyw.set_data_received_callback(self.data_received_callback)
+		self.__cyw.set_error_callback(self.error_callback)
+		self.__cyw.set_use_encryption(True)
+		#self.cyw.enable_logging('/var/log/cywsshd.log', logging.DEBUG, True)
         self.__cyw.name = 'Cyw Secure Terminal'
         
         logger.info('Connecting to ControlYourWay...')
         self.__cyw.start()                
 
+	def error_callback(self, error_code):
+        logger.error(error_code + ' - ' + self.cyw.convert_error_code_to_string(error_code))	
+	
     def connection_status_callback(self, connected):
         if connected:  # connection was successful
             logger.info('Connection to ControlYourWay successful')

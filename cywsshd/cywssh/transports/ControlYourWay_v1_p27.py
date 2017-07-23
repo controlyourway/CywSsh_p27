@@ -19,6 +19,8 @@ import httplib
 from httplib import HTTPConnection, HTTPS_PORT
 import socket
 import websocket
+import logging
+from logging.handlers import RotatingFileHandler
 
 
 # HTTPSConnection is not working in Ubuntu. This code fixes the problem
@@ -166,7 +168,6 @@ class CywLocals:
         self.device_id = ''
         self.session_id = -1
         self.use_encryption = False
-        self.enable_debug_messages = False
         self.service_running = False
         self.to_master_for_cloud_queue = CywQueue()  # special queue that allows us to push one item to the front
         self.from_to_cloud_to_master_queue = Queue.Queue()
@@ -181,7 +182,6 @@ class CywLocals:
         self.networks_updated = False
         self.discoverable = True
         self.headers = {'Content-type': 'application/octet-stream'}
-        self.print_info_enabled = False
 
         # counters
         self.counters = CywCounters()
@@ -194,7 +194,6 @@ class CywLocals:
         # callbacks
         self.data_received_callback = None
         self.connection_status_callback = None
-        self.debug_messages_callback = None
         self.error_callback = None
 
         # master thread variables
@@ -225,6 +224,8 @@ class CywLocals:
         self.websocket_ssl_url = ''
         self.use_websocket = True
         self.set_use_websocket = False
+
+        self.logger = logging.getLogger('cyw')
 
 
 # create a new instance of a blank class
@@ -277,9 +278,24 @@ class CywInterface:
         self.name = 'cywPythonDevice'
         self.connected = False
 
-    def print_info(self, message):
-        if self.__locals.print_info_enabled:
-            print(message)
+    def enable_logging(self, log_filename, log_level, enable_console_logging):
+        """This function will enable logging to file for debugging purposes
+        :param log_filename: The file that will be used to log data, send empty string not to use file logging
+        :param log_level: The minimum log level that will be logged to file
+        :param enable_console_logging: If true then send log messages to console
+        """
+        # Add a file handler
+        if log_filename != "":
+            filehandler = RotatingFileHandler(log_filename, maxBytes=100000, backupCount=10)
+            # create a logging format
+            filehandler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+            self.__locals.logger.addHandler(filehandler)
+        # Add a console handler
+        if enable_console_logging:
+            consolehandler = logging.StreamHandler()
+            consolehandler.setFormatter(logging.Formatter('%(levelname)s - %(message)s'))
+            self.__locals.logger.addHandler(consolehandler)
+            self.__locals.logger.setLevel(log_level)
 
     def set_user_name(self, user_name):
         """Change the user name. This can only be changed when the service is not started
@@ -290,6 +306,7 @@ class CywInterface:
             self.__locals.user_name = user_name
             return '0'
         else:
+            self.__locals.logger.error('User name cannot be set after service has started')
             return '10'
 
     def set_network_password(self, network_password):
@@ -302,6 +319,7 @@ class CywInterface:
             self.__locals.network_password = network_password
             return '0'
         else:
+            self.__locals.logger.error('Password cannot be set after service has started')
             return '10'
 
     def set_network_names(self, network_names):
@@ -317,6 +335,7 @@ class CywInterface:
             if len(network_names[i]) > 0:
                 self.__locals.network_names.append(network_names[i])
         self.__locals.networks_updated = False
+        self.__locals.logger.debug('New network names set')
         if self.__locals.cyw_state == self.__locals.constants.state_running:
             # if service is already running then stop the download request so that new networks can be loaded
             self.send_cancel_request()
@@ -340,13 +359,11 @@ class CywInterface:
                     # send websocket termination message
                     l.websocket.send('~c=c' + l.constants.terminating_string)
                     l.websocket_state = l.constants.ws_state_closing_connection
-                    if l.enable_debug_messages and l.debug_messages_callback is not None:
-                        l.debug_messages_callback("WebSocket: Close connection message sent")
+                    l.logger.debug('WebSocket: Close connection message sent')
                 else:
                     # send long polling termination message
                     self.send_cancel_request()
-                    if l.enable_debug_messages and l.debug_messages_callback is not None:
-                        l.debug_messages_callback("WebSocket: Long polling cancel request sent")
+                    l.logger.debug('WebSocket: Long polling cancel request sent')
                     l.websocket_state = l.constants.ws_state_not_connected
                     l.set_use_websocket = True
                     while not l.to_master_for_cloud_queue.empty():
@@ -365,6 +382,7 @@ class CywInterface:
         :return: 0 if successful
         """
         self.__locals.discoverable = discoverable
+        self.__locals.logger.debug('Discoverable state set to %s', discoverable)
         return '0'
 
     def set_download_timeout(self, value):
@@ -381,6 +399,7 @@ class CywInterface:
             self.__locals.download_timeout = value
         if self.__locals.cyw_state == self.__locals.constants.state_running:
             self.send_cancel_request(False)
+        self.__locals.logger.debug('Download timeout set to %s', self.__locals.download_timeout)
 
     def get_download_timeout(self):
         """Return the amount of time in seconds the download thread will wait before starting a new request if no data
@@ -421,24 +440,13 @@ class CywInterface:
                     l.websocket.send('~c=c' + l.constants.terminating_string)
                 else:
                     self.send_cancel_request()
+            l.logger.debug('Use encryption set to %s', value)
 
     def get_use_encryption(self):
         """Return the value if encryption is used or not
         :return: True or False
         """
         return self.__locals.use_encryption
-
-    def set_enable_debug_messages(self, value):
-        """If enabled then debug messages will be sent back using the debug messages callback
-        :param value: True or False
-        """
-        self.__locals.enable_debug_messages = value
-
-    def get_enable_debug_messages(self):
-        """Return value of debug messages enabled property
-        :return: True or False
-        """
-        return self.__locals.enable_debug_messages
 
     def get_session_id(self):
         """Get the session ID that the server assigned to this instance.
@@ -471,13 +479,6 @@ class CywInterface:
         """
         self.__locals.error_callback = cb
 
-    def set_debug_messages_callback(self, cb):
-        """When debug messages are enabled then this function is called with messages about what is happening in this
-        module
-        :param cb: callback function name
-        """
-        self.__locals.debug_messages_callback = cb
-
     def start(self):
         """Start the service. This function must be called for communication with the server to start. The connection
         status callback will have the result if the connection was successful
@@ -485,8 +486,10 @@ class CywInterface:
         """
         l = self.__locals
         if l.user_name == '':
+            l.logger.error('No user name specified')
             return '8'
         if l.network_password == '':
+            l.logger.error('No password specified')
             return '8'
         l.closing_threads = False
         # start master thread
@@ -580,7 +583,7 @@ class CywInterface:
         l = self.__locals
         l.master_thread_running = True
         l.master_thread_terminated = False
-        self.print_info('Master thread started')
+        l.logger.info('Master thread started')
         while l.master_thread_running:
             something_happened = False
             if not m.waiting_for_response:
@@ -615,8 +618,7 @@ class CywInterface:
                         send_packet.post_data = CywInterface.encode_cyw_protocol(cyw_dict)
                         send_packet.packet_type = l.constants.request_credentials
                         l.to_cloud_queue.put(send_packet)
-                        if l.enable_debug_messages and l.debug_messages_callback is not None:
-                            l.debug_messages_callback("Request credentials")
+                        l.logger.debug('Request credentials')
                         l.networks_updated = False
                 elif l.cyw_state == l.constants.state_running:
                     if l.use_websocket:
@@ -626,6 +628,7 @@ class CywInterface:
                             m.wait_before_retry = self.get_epoch_time() + 5
                             m.waiting_for_response = True
                             something_happened = True
+                            l.logger.debug('WebSocket: Send connection auth message')
                         elif l.websocket_state == l.constants.ws_state_set_listen_to_networks:
                             m.wait_before_retry = self.get_epoch_time() + 5
                             m.waiting_for_response = True
@@ -637,12 +640,12 @@ class CywInterface:
                             network_data += l.constants.terminating_string
                             l.websocket.send(network_data)
                             self.set_new_websocket_keep_alive_timeout(l.constants.websocket_keep_alive_timeout)
+                            l.logger.debug('WebSocket: Set network names')
                     if not m.last_packet_sent and m.send_packet is not None:
                         # try again with packet that failed previously
                         l.to_cloud_queue.put(m.send_packet)
                         m.waiting_for_response = True
-                        if l.enable_debug_messages and l.debug_messages_callback is not None:
-                            l.debug_messages_callback("Try to send packet again")
+                        l.logger.debug('Try to send packet again')
                     # check if there is new data to send
                     elif not l.to_master_for_cloud_queue.empty():
                         add_id = True    # id must only be added once
@@ -710,14 +713,14 @@ class CywInterface:
                             to_cloud_packet.post_data += l.constants.terminating_string
                             l.websocket.send(to_cloud_packet.post_data)
                             self.set_new_websocket_keep_alive_timeout(l.constants.websocket_keep_alive_timeout)
+                            l.logger.debug('WebSocket: Sending packet')
                         else:
                             # add counter
                             to_cloud_packet.post_data += '~z=' + str(l.counters.upload)
                             l.to_cloud_queue.put(to_cloud_packet)
+                            l.logger.debug('Long Polling: Sending packet')
                         l.counters.upload += 1
                         m.waiting_for_response = True
-                        if l.enable_debug_messages and l.debug_messages_callback is not None:
-                            l.debug_messages_callback("Sending packet")
             # //////////////////////////////////////////////////////////////////////////////////////////////
             # process data received from web socket
             if not l.websocket_receive_queue.empty():
@@ -733,60 +736,61 @@ class CywInterface:
                         if ws_error_code == '0':
                             # connection authenticated
                             l.websocket_state = l.constants.ws_state_set_listen_to_networks
-                            if l.enable_debug_messages and l.debug_messages_callback is not None:
-                                l.debug_messages_callback('WebSocket connection authenticated')
+                            l.logger.debug('WebSocket connection authenticated')
                             self.set_new_websocket_keep_alive_timeout(l.constants.websocket_keep_alive_timeout)
                         else:
-                            if l.enable_debug_messages and l.debug_messages_callback is not None:
-                                l.debug_messages_callback('WebSocket authentication failed, error code: ' + ws_error_code)
+                            l.logger.debug('WebSocket authentication failed, error code: ' + ws_error_code)
                             l.cyw_state = l.constants.state_request_credentials
                             l.websocket_state = l.constants.ws_state_not_connected
                             try:
                                 l.websocket.close()
                             except:
-                                pass
+                                l.logger.error('Exception trying to close WebSocket connection')
                         m.waiting_for_response = False
                         self.set_new_websocket_keep_alive_timeout(l.constants.websocket_keep_alive_timeout)
                         l.keep_alive_sent = False
                     elif response_type_value == 'n':   # set listen to networks response
                         l.networks_updated = True
+                        l.websocket_state = l.constants.ws_state_running
                         if ws_error_code == '4':  # New set of networks to which device is listening was set
-                            if l.enable_debug_messages and l.debug_messages_callback is not None:
-                                l.debug_messages_callback('All listen to networks was set')
+                            l.logger.debug('All listen to networks was set')
                         elif ws_error_code == '5':  # Not all of the networks to which device is listening was set
-                            if l.enable_debug_messages and l.debug_messages_callback is not None:
-                                l.debug_messages_callback('Not all listen to networks was set')
+                            l.logger.error('Not all listen to networks was set')
                             if l.error_callback is not None:
                                 l.error_callback(ws_error_code)
                         elif ws_error_code == '12':  # session id expired
                             l.websocket_state = l.constants.ws_state_not_connected
                             l.cyw_state = l.constants.state_request_credentials
+                            l.logger.debug('Session id expired, request credentials again')
                         else:
-                            if l.enable_debug_messages and l.debug_messages_callback is not None:
-                                l.debug_messages_callback('Error updating networks: ' + ws_error_code)
+                            l.logger.error('Error updating networks: ' + ws_error_code)
                             if l.error_callback is not None:
                                 l.error_callback(ws_error_code)
-                        l.websocket_state = l.constants.ws_state_running
                         m.waiting_for_response = False
                         self.set_new_websocket_keep_alive_timeout(l.constants.websocket_keep_alive_timeout)
                         l.keep_alive_sent = False
                     elif response_type_value == 's':   # send data response
                         send_error = False
                         if ws_error_code == '0':  # success
-                            if l.enable_debug_messages and l.debug_messages_callback is not None:
-                                l.debug_messages_callback('Last message sent')
+                            l.logger.debug('Last message sent')
                         elif ws_error_code == '1':  # Unknown error
                             send_error = True
+                            l.logger.error('Unknown error sending last message')
                         elif ws_error_code == '2':  # Data could not be sent to one or more recipients
                             send_error = True
+                            l.logger.error('Data could not be sent to one or more recipients')
                         elif ws_error_code == '7':  # Protocol error
                             send_error = True
+                            l.logger.error('Sending data protocol error')
                         elif ws_error_code == '12':  # expired session id
                             l.websocket_state = l.constants.ws_state_not_connected
                             l.cyw_state = l.constants.state_request_credentials
+                            l.logger.error('Sending data, session id expired')
                         elif ws_error_code == '20':  # Could not establish connection to website
                             send_error = True
+                            l.logger.error('Could not establish connection to website')
                         else:
+                            l.logger.error('Invalid data received from server')
                             ws_error_code = '3'  # Invalid data received from server, please restart service
                             send_error = True
                         if send_error:
@@ -798,10 +802,11 @@ class CywInterface:
                         l.keep_alive_sent = False
                     elif response_type_value == 'r':   # receive data
                         ws_rec_data = DownloadResponse()
+                        l.logger.debug('Data received from server')
                         for i_rec_data in range(1,  len(wsdict.keys)):
                             if wsdict.keys[i_rec_data] == 'f':  # from session id
                                 ws_rec_data.from_who = int(wsdict.values[i_rec_data])
-                            elif wsdict.keys[i_rec_data] == 'dt': # data type
+                            elif wsdict.keys[i_rec_data] == 'dt':  # data type
                                 ws_rec_data.data_type = wsdict.values[i_rec_data]
                             elif wsdict.keys[i_rec_data] == 'd':  # data
                                 ws_rec_data.data = wsdict.values[i_rec_data]
@@ -810,8 +815,7 @@ class CywInterface:
                     elif response_type_value == 'k':
                         self.set_new_websocket_keep_alive_timeout(l.constants.websocket_keep_alive_timeout)
                         l.keep_alive_sent = False
-                        if l.enable_debug_messages and l.debug_messages_callback is not None:
-                            l.debug_messages_callback('WebSocket: Keep alive message acknowledged')
+                        l.logger.debug('WebSocket: Keep alive message acknowledged')
                     elif response_type_value == 'c':
                         if ws_error_code == '0':
                             if l.websocket_state == l.constants.ws_state_restart_connection:
@@ -819,18 +823,15 @@ class CywInterface:
                             else:
                                 l.websocket_state = l.constants.ws_state_closing_connection
                             l.websocket.close()
-                            if l.enable_debug_messages and l.debug_messages_callback is not None:
-                                l.debug_messages_callback('WebSocket: Connection closed')
+                            l.logger.info('WebSocket: Connection closed')
                             if l.closing_threads:
                                 l.cyw_state = l.constants.request_credentials
                                 self.connected = False
                                 if l.connection_status_callback is not None:
                                     l.connection_status_callback(False)
-                                if l.enable_debug_messages and l.debug_messages_callback is not None:
-                                    l.debug_messages_callback('Stopped the service')
+                                    l.logger.info('WebSocket: Stopped the service')
                         else:
-                            if l.enable_debug_messages and l.debug_messages_callback is not None:
-                                l.debug_messages_callback('WebSocket: Error closing connection')
+                            l.logger.error('WebSocket: Error closing connection')
                             if l.error_callback is not None:
                                 l.error_callback(ws_error_code)
             if l.use_websocket:
@@ -852,36 +853,32 @@ class CywInterface:
                     something_happened = True
                     l.websocket_state = l.constants.ws_state_connected_not_auth
                     m.waiting_for_response = False
-                if (m.wait_before_retry < self.get_epoch_time()) and \
-                        (l.websocket_state == l.constants.ws_state_connected_not_auth):
-                    # authorisation sent but has timed out, send it again
-                    something_happened = True
-                    m.waiting_for_response = False
+                    l.logger.debug('WebSocket: Auth timed out, trying again')
                 if (m.wait_before_retry < self.get_epoch_time()) and \
                         (l.websocket_state == l.constants.ws_state_set_listen_to_networks_sent):
                     # no response when setting networks, try again
                     something_happened = True
                     m.waiting_for_response = False
                     l.websocket_state = l.constants.ws_state_set_listen_to_networks_sent
+                    l.logger.debug('WebSocket: Setting networks timed out, trying again')
                 if (l.websocket_state == l.constants.ws_state_running) and \
                         (self.check_if_websocket_keep_alive_expired()):
                     if not l.keep_alive_sent:
                         l.websocket.send(l.constants.terminating_string)
                         self.set_new_websocket_keep_alive_timeout(l.constants.websocket_keep_alive_sent_timeout)
                         l.keep_alive_sent = True
-                        if l.enable_debug_messages and l.debug_messages_callback is not None:
-                            l.debug_messages_callback("WebSocket: Keep alive message sent")
+                        l.logger.debug('WebSocket: Keep alive message sent')
                     else:
                         # websocket response timed out, connection is dead. Create new connection
                         l.websocket_state = l.constants.ws_state_not_connected
                         l.websocket.close()
-                        if l.enable_debug_messages and l.debug_messages_callback is not None:
-                            l.debug_messages_callback("WebSocket: Timeout, restarting connection")
+                        l.logger.debug('WebSocket: Timeout, restarting connection')
             # //////////////////////////////////////////////////////////////////////////////////////////////
             # see if response from toCloud thread
             if not l.from_to_cloud_to_master_queue.empty():
                 # parse response from upload request
                 d = l.from_to_cloud_to_master_queue.get()
+                l.logger.debug('To cloud thread data received')
                 if d is not None:
                     something_happened = True
                     m.waiting_for_response = False
@@ -927,13 +924,11 @@ class CywInterface:
                                     self.build_urls()
                                     l.download_thread_request = True  # download thread can start requesting
                                     self.connected = True
-                                    if l.enable_debug_messages and l.debug_messages_callback is not None:
-                                        l.debug_messages_callback('Got credentials from server')
+                                    l.logger.debug('Got credentials from server')
                                     if l.connection_status_callback is not None:
                                         l.connection_status_callback(True)
                                 else:
-                                    if l.enable_debug_messages and l.debug_messages_callback is not None:
-                                        l.debug_messages_callback('Error parsing server IP address')
+                                    l.logger.debug('Error parsing server IP address')
                         elif error_code == '8':  # invalid username or network password
                             if l.error_callback is not None:
                                 l.error_callback(error_code)
@@ -944,60 +939,72 @@ class CywInterface:
                             l.download_thread_running = False
                             l.upload_thread_running = False
                             l.master_thread_running = False
+                            l.websocket_thread_running = False
                             if l.connection_status_callback is not None:
                                 l.connection_status_callback(False)
-                            if l.enable_debug_messages and l.debug_messages_callback is not None:
-                                l.debug_messages_callback('Invalid user credentials')
+                            if l.error_callback is not None:
+                                l.error_callback(error_code)
+                            l.logger.debug('Invalid user credentials')
                         elif error_code == '20':  # connection problem
                             if l.error_callback is not None:
                                 l.error_callback(error_code)
+                            l.logger.debug('Could not connect to server')
                         else:  # protocol error
                             if l.error_callback is not None:
                                 l.error_callback('7')
+                            l.logger.debug('Protocol error')
                     elif d.packet_type == l.constants.data_packet:
                         send_error = False  # fail immediately if true
                         retry_message = False  # retry message again if we have not reached max retries
                         if error_code == '0':  # success
-                            if l.enable_debug_messages and l.debug_messages_callback is not None:
-                                l.debug_messages_callback('Last message sent')
+                            l.logger.debug('Last message sent')
                         elif error_code == '1':  # unknown error
                             retry_message = True
+                            l.logger.debug('Unknown error')
                         elif error_code == '2':  # data could not be sent to one or more recipients
                             send_error = True
+                            l.logger.debug('Data could not be sent to one or more recipients')
                         elif error_code == '7':  # protocol error
                             retry_message = True
+                            l.logger.debug('Protocol error')
                         elif error_code == '12':  # invalid/expired id
                             send_error = True
                             l.cyw_state = l.constants.request_credentials
+                            l.logger.debug('Expired/invalid session id')
                         elif error_code == '15':  # response to a cancel request
                             if l.closing_threads:
                                 l.cyw_state = l.constants.request_credentials
                                 self.connected = False
                                 if l.connection_status_callback is not None:
                                     l.connection_status_callback(False)
-                                if l.enable_debug_messages and l.debug_messages_callback is not None:
-                                    l.debug_messages_callback('Stopped the service')
+                                    l.logger.debug('Stopped the service')
                         elif error_code == '20':  # could not establish connection to website
                             retry_message = True
+                            l.logger.debug('Could not establish connection to website')
                         else:
                             error_code = '3'  # invalid data received from server
                             retry_message = True
+                            l.logger.debug('Invalid data received from server')
                         if retry_message:
                             if m.retry_count < m.max_retries:
                                 m.last_packet_sent = False
                                 m.send_packet = m.last_packet_uploaded
                                 m.retry_count += 1
+                                l.logger.debug('Retrying...')
                             else:
                                 m.last_packet_sent = True
+                                l.logger.debug('Max retries reached')
                                 if l.error_callback is not None:
                                     l.error_callback(error_code)
                         if send_error:
+                            l.logger.debug('Send error')
                             if l.error_callback is not None:
-                                    l.error_callback(error_code)
+                                l.error_callback(error_code)
             # ////////////////////////////////////////////////////////////////////////////////////////////
             # data from FromCloud thread
             if not l.from_from_cloud_to_master_queue.empty():
                 d = l.from_from_cloud_to_master_queue.get()
+                l.logger.debug('From cloud thread data received')
                 if d is not None:
                     something_happened = True
                     if d.error_code == '0':  # no error - data was received
@@ -1008,33 +1015,27 @@ class CywInterface:
                             send_data.data = self.name
                             send_data.to_session_ids.append(str(d.from_who))
                             self.send_data(send_data)
-                            if l.enable_debug_messages and l.debug_messages_callback is not None:
-                                l.debug_messages_callback('Discovery response sent')
+                            l.logger.debug('Discovery response sent')
                         else:
-                            if l.enable_debug_messages and l.debug_messages_callback is not None:
-                                d_mes = 'Data received: ' + d.data + ', Data type: ' + d.data_type
-                                d_mes += ', From: ' + str(d.from_who)
-                                l.debug_messages_callback(d_mes)
+                            d_mes = 'Data received: ' + d.data + ', Data type: ' + d.data_type
+                            d_mes += ', From: ' + str(d.from_who)
+                            l.logger.debug(d_mes)
                             if l.data_received_callback is not None:
                                 l.data_received_callback(d.data, d.data_type, d.from_who)
                     elif d.error_code == '12':     # invalid session id
                         l.cyw_state = l.constants.state_request_credentials
-                        if l.enable_debug_messages and l.debug_messages_callback is not None:
-                            l.debug_messages_callback('Invalid session ID from FromCloud thread')
+                        l.logger.debug('Invalid session ID from FromCloud thread')
                     # elif '16':   # no data available
                     elif d.error_code == '18':     # multiple download requests made with the same session id
                         l.cyw_state = l.constants.state_request_credentials
-                        if l.enable_debug_messages and l.debug_messages_callback is not None:
-                            l.debug_messages_callback('Multiple downloads from same session ID')
+                        l.logger.debug('Multiple downloads from same session ID')
                     elif d.error_code == '24':     # download request timeout changed
-                        if l.enable_debug_messages and l.debug_messages_callback is not None:
-                            d_mes = 'Download request timeout changed to: ' + str(l.download_timeout) + ' seconds'
-                            l.debug_messages_callback(d_mes)
+                        l.logger.debug('Download request timeout changed to: ' + str(l.download_timeout) + ' seconds')
 
             if not something_happened:
                 time.sleep(l.constants.thread_sleep_time)
         l.master_thread_terminated = True
-        self.print_info('Master thread terminated')
+        l.logger.debug('Master thread terminated')
 
     def upload_thread(self):
         """This function must never be called directly by user. Call Start() to start the service
@@ -1043,7 +1044,7 @@ class CywInterface:
         l = self.__locals
         l.upload_thread_running = True
         l.upload_thread_terminated = False
-        self.print_info('Upload thread started')
+        l.logger.debug('Upload thread started')
         while l.upload_thread_running:
             if not l.to_cloud_queue.empty():
                 try:
@@ -1057,10 +1058,10 @@ class CywInterface:
                     else:
                         where = packet.url
                         con = httplib.HTTPConnection(where)
+                    upload_response = UploadResponse()
                     con.request('POST', packet.page, packet.post_data, l.headers)
                     response = con.getresponse()
-                    self.print_info('Upload request sent')
-                    upload_response = UploadResponse()
+                    l.logger.debug('Upload request sent')
                     upload_response.packet_type = packet.packet_type
                     if response.status == 200:
                         upload_response.response = response.read()
@@ -1072,7 +1073,7 @@ class CywInterface:
             else:
                 time.sleep(self.__locals.constants.thread_sleep_time)
         l.upload_thread_terminated = True
-        self.print_info('Upload thread terminated')
+        l.logger.debug('Upload thread terminated')
 
     def download_thread(self):
         """This function must never be called directly by user. Call Start() to start the service
@@ -1084,7 +1085,7 @@ class CywInterface:
         l.restart_download = False
         l.last_download_successful = False
         download_started_time = self.get_epoch_time()
-        self.print_info('Download thread started')
+        l.logger.debug('Download thread started')
         while l.download_thread_running:
             if l.use_websocket:
                 # this thread must not do anything if we use websocket
@@ -1117,17 +1118,14 @@ class CywInterface:
                                 l.restart_download = False
                                 post_data += '~r=1'
                         post_data += '~z=' + str(l.counters.download)
-                        if l.enable_debug_messages and l.debug_messages_callback is not None:
-                            if update_networks:
-                                d_mes = 'Update default networks started (' + str(l.counters.download) + ')'
-                                l.debug_messages_callback(d_mes)
-                            else:
-                                l.debug_messages_callback('New download request started (' + str(l.counters.download) + ')')
+                        if update_networks:
+                            l.logger.debug('Update default networks started (' + str(l.counters.download) + ')')
+                        else:
+                            l.logger.debug('New download request started (' + str(l.counters.download) + ')')
                         l.counters.download += 1
-                        self.print_info('Download request started')
                         con.request('POST', l.download_page, post_data, l.headers)
                         response = con.getresponse()
-                        self.print_info('Download response received')
+                        l.logger.debug('Download response received')
                         if response.status == 200:
                             temp_resp = response.read()
                             cyw_dict = CywInterface.decode_cyw_protocol(temp_resp)
@@ -1148,38 +1146,32 @@ class CywInterface:
                                             d = DownloadResponse()
                                     l.last_download_successful = True
                                 elif error_code == '1':  # unknown error
-                                    if l.enable_debug_messages and l.debug_messages_callback is not None:
-                                        l.debug_messages_callback('Download error - Unknown error')
+                                    l.logger.debug('Download error - Unknown error')
                                     l.wait_before_next_request = True
                                 elif error_code == '4':  # new set of networks to which device is listening was set
                                     l.networks_updated = True
-                                    if l.enable_debug_messages and l.debug_messages_callback is not None:
-                                        l.debug_messages_callback('All listen to networks was set')
+                                    l.logger.debug('All listen to networks was set')
                                     l.last_download_successful = True
                                 elif error_code == '5':  # not all of the networks to which device is listening was set
                                     l.networks_updated = True
-                                    if l.enable_debug_messages and l.debug_messages_callback is not None:
-                                        l.debug_messages_callback('Not all listen to networks was set')
+                                    l.logger.debug('Not all listen to networks was set')
                                     if l.error_callback is not None:
                                         l.error_callback(error_code)
                                     l.last_download_successful = True
                                 elif error_code == '7':  # protocol error
-                                    if l.enable_debug_messages and l.debug_messages_callback is not None:
-                                        l.debug_messages_callback('Download error - Protocol error')
+                                    l.logger.debug('Download error - Protocol error')
                                     l.wait_before_next_request = True
                                     l.last_download_successful = True
                                 elif error_code == '12':  # invalid/expired id
                                     d = DownloadResponse()
                                     d.error_code = error_code
                                     l.from_from_cloud_to_master_queue.put(d)
-                                    if l.enable_debug_messages and l.debug_messages_callback is not None:
-                                        l.debug_messages_callback('Download error - Session ID expired')
+                                    l.logger.debug('Download error - Session ID expired')
                                     l.wait_before_next_request = True
                                     l.last_download_successful = True
                                     l.cyw_state = l.constants.state_request_credentials
                                 elif error_code == '15':  # download request cancelled by user
-                                    if l.enable_debug_messages and l.debug_messages_callback is not None:
-                                        l.debug_messages_callback('Download cancelled by user')
+                                    l.logger.debug('Download cancelled by user')
                                     l.last_download_successful = True
                                     if l.set_use_websocket:
                                         l.set_use_websocket = False
@@ -1191,6 +1183,7 @@ class CywInterface:
                                     # without us knowing about it. This will cause a duplicate request error.
                                     # if the request is older than 5 seconds then this is what happened. Calculate the time
                                     # it took and make sure that the request time is shorter than this
+                                    l.logger.debug('Multiple requests to same session ID')
                                     current_time = self.get_epoch_time()
                                     if l.last_download_successful:
                                         delta_t = current_time - download_started_time
@@ -1229,7 +1222,7 @@ class CywInterface:
                 else:
                     time.sleep(0.1)
         l.download_thread_terminated = True
-        self.print_info('Download thread terminated')
+        l.logger.debug('Download thread terminated')
 
     def build_urls(self):
         """This function must never be called directly by user. Call Start() to start the service
@@ -1267,8 +1260,7 @@ class CywInterface:
             send_packet.data = post_str
             send_packet.packet_type = l.constants.cancel_request
             l.to_master_for_cloud_queue.put(send_packet)
-            if l.enable_debug_messages and l.debug_messages_callback is not None:
-                l.debug_messages_callback('Download cancel request sent to server')
+            l.logger.debug('Download cancel request sent to server')
 
     def close_connection(self, clear_callbacks=False):
         """ Must be called when service is stopped. This will close all the connections and threads
@@ -1279,7 +1271,6 @@ class CywInterface:
         if clear_callbacks:
             l.data_received_callback = None
             l.connection_status_callback = None
-            l.debug_messages_callback = None
             l.error_callback = None
         l.closing_threads = True
         l.download_thread_running = False
@@ -1287,15 +1278,17 @@ class CywInterface:
             if l.use_websocket:
                 l.websocket.send('~c=t' + l.constants.terminating_string)  # send websocket termination message
                 l.websocket_state = l.constants.ws_state_closing_connection
-                if l.enable_debug_messages and l.debug_messages_callback is not None:
-                    l.debug_messages_callback('WebSocket: Close connection message sent')
+                l.logger.debug('WebSocket: Close connection message sent')
             else:
                 self.send_cancel_request(True)
+                l.logger.debug('Long polling: Close connection message sent')
         l.download_thread.join()
         l.upload_thread_running = False
         l.upload_thread.join()
         l.master_thread_running = False
         l.master_thread.join()
+        l.websocket_thread_running = False
+        l.websocket_thread.join()
         if l.connection_status_callback is not None:
             l.connection_status_callback(False)
 
@@ -1306,9 +1299,15 @@ class CywInterface:
         """
         if self.__locals.error_codes is None:
             return error_code
-        error_str = CywInterface.get_cyw_dictionary_single_value(self.__locals.error_codes, error_code)
+        if type(error_code) is int:
+            error_code_num = error_code
+        elif type(error_code) is str:
+            error_code_num = int(error_code)
+        else:
+            return error_code
+        error_str = CywInterface.get_cyw_dictionary_single_value(self.__locals.error_codes, error_code_num)
         if error_str is None:
-            error_str = 'Error code not defined'
+            error_str = 'Check https://www.controlyourway.com/Resources/CywErrorCodes for error codes'
         return error_str
 
     @staticmethod
@@ -1456,26 +1455,26 @@ class CywInterface:
 
     def websocket_onopen(self, ws):
         l = self.__locals
-        if l.enable_debug_messages and l.debug_messages_callback is not None:
-            l.debug_messages_callback('WebSocket connection established')
+        l.logger.debug('WebSocket onopen event')
         l.websocket_state = l.constants.ws_state_connected_not_auth
 
     def websocket_onclose(self, ws):
         l = self.__locals
+        l.logger.debug('WebSocket onclose event')
         if l.websocket_state != l.constants.ws_state_waiting_for_connection:  # connection has already been restarted
             l.websocket_state = l.constants.ws_state_not_connected
 
     def websocket_onerror(self, ws, error):
         l = self.__locals
-        if l.enable_debug_messages and l.debug_messages_callback is not None:
-            l.debug_messages_callback('Error in WebSocket connection')
-        #restart connection on websocket error
+        l.logger.debug('WebSocket onerror event' + error)
+        # restart connection on websocket error
         l.websocket_state = l.constants.ws_state_not_connected
         l.websocket.close()
         l.cyw_state = l.constants.state_request_credentials
 
     def websocket_onmessage(self, ws, message):
         l = self.__locals
+        l.logger.debug('WebSocket onmessage event')
         l.websocket_rec_data_buf += message
         while self.process_websocket_rec_data():
             pass
@@ -1487,6 +1486,7 @@ class CywInterface:
         l = self.__locals
         l.websocket_thread_running = True
         l.websocket_thread_terminated = False
+        l.logger.info('WebSocket thread started')
         while l.websocket_thread_running:
             if not l.use_websocket:
                 time.sleep(0.2)  # this thread must not do anything when long polling is used
@@ -1495,6 +1495,7 @@ class CywInterface:
                     if l.websocket_state == l.constants.ws_state_not_connected:
                         try:
                             # websocket.enableTrace(True)
+                            l.logger.debug('Create WebSocket connection')
                             if l.use_encryption:
                                 connect_str = l.websocket_ssl_url
                             else:
@@ -1508,17 +1509,18 @@ class CywInterface:
                             l.websocket_state = l.constants.ws_state_waiting_for_connection
                             # l.master_vars.wait_before_retry = self.get_epoch_time() + 5
                         except:
-                            if l.enable_debug_messages and l.debug_messages_callback is not None:
-                                l.debug_messages_callback('Error opening WebSocket connection')
+                            l.logger.debug('Error opening WebSocket connection')
                             time.sleep(1)
             time.sleep(0.1)
+        l.websocket_thread_terminated = True
+        l.logger.info('WebSocket thread exit')
 
     def process_websocket_rec_data(self):
         l = self.__locals
         try:
             terminating_tag_index = l.websocket_rec_data_buf.index(l.constants.terminating_string)
             # at least one complete message was received
-            terminating_tag_index += 4;  # add size of terminating tag
+            terminating_tag_index += 4  # add size of terminating tag
             new_message = l.websocket_rec_data_buf[:terminating_tag_index]
             l.websocket_rec_data_buf = l.websocket_rec_data_buf[terminating_tag_index:] # remove received part
             dict = CywInterface.decode_cyw_protocol(new_message)
