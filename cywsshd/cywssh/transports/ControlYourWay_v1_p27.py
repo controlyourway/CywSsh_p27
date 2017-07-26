@@ -285,17 +285,20 @@ class CywInterface:
         :param enable_console_logging: If true then send log messages to console
         """
         # Add a file handler
+        l = self.__locals
+        for h in list(l.logger.handlers):
+            l.logger.removeHandler(h)
         if log_filename != "":
-            filehandler = RotatingFileHandler(log_filename, maxBytes=100000, backupCount=10)
+            filehandler = RotatingFileHandler(log_filename, maxBytes=10000, backupCount=5)
             # create a logging format
             filehandler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-            self.__locals.logger.addHandler(filehandler)
+            l.logger.addHandler(filehandler)
         # Add a console handler
         if enable_console_logging:
             consolehandler = logging.StreamHandler()
             consolehandler.setFormatter(logging.Formatter('%(levelname)s - %(message)s'))
-            self.__locals.logger.addHandler(consolehandler)
-            self.__locals.logger.setLevel(log_level)
+            l.logger.addHandler(consolehandler)
+            l.logger.setLevel(log_level)
 
     def set_user_name(self, user_name):
         """Change the user name. This can only be changed when the service is not started
@@ -357,7 +360,7 @@ class CywInterface:
             if l.cyw_state == l.constants.state_running:
                 if l.use_websocket:
                     # send websocket termination message
-                    l.websocket.send('~c=c' + l.constants.terminating_string)
+                    l.websocket.send('~c=t' + l.constants.terminating_string)
                     l.websocket_state = l.constants.ws_state_closing_connection
                     l.logger.debug('WebSocket: Close connection message sent')
                 else:
@@ -587,7 +590,7 @@ class CywInterface:
         while l.master_thread_running:
             something_happened = False
             if not m.waiting_for_response:
-                if l.cyw_state == l.constants.state_request_credentials:
+                if l.cyw_state == l.constants.state_request_credentials and not l.closing_threads:
                     # check if enough time elapsed between retries to not swamp the server
                     if m.wait_before_retry < self.get_epoch_time():
                         something_happened = True
@@ -825,11 +828,12 @@ class CywInterface:
                             l.websocket.close()
                             l.logger.info('WebSocket: Connection closed')
                             if l.closing_threads:
-                                l.cyw_state = l.constants.request_credentials
-                                self.connected = False
-                                if l.connection_status_callback is not None:
-                                    l.connection_status_callback(False)
-                                    l.logger.info('WebSocket: Stopped the service')
+                                l.cyw_state = l.constants.state_request_credentials
+                                if self.connected:
+                                    self.connected = False
+                                    if l.connection_status_callback is not None:
+                                        l.connection_status_callback(False)
+                                l.logger.info('WebSocket: Stopped the service')
                         else:
                             l.logger.error('WebSocket: Error closing connection')
                             if l.error_callback is not None:
@@ -969,11 +973,11 @@ class CywInterface:
                             l.logger.debug('Protocol error')
                         elif error_code == '12':  # invalid/expired id
                             send_error = True
-                            l.cyw_state = l.constants.request_credentials
+                            l.cyw_state = l.constants.state_request_credentials
                             l.logger.debug('Expired/invalid session id')
                         elif error_code == '15':  # response to a cancel request
                             if l.closing_threads:
-                                l.cyw_state = l.constants.request_credentials
+                                l.cyw_state = l.constants.state_request_credentials
                                 self.connected = False
                                 if l.connection_status_callback is not None:
                                     l.connection_status_callback(False)
@@ -1248,7 +1252,7 @@ class CywInterface:
         :return:
         """
         l = self.__locals
-        if l.cyw_state != l.constants.request_credentials:  # service is running
+        if l.cyw_state != l.constants.state_request_credentials:  # service is running
             send_packet = CloudSendPacket()
             send_packet.url = l.server_ip_addr
             send_packet.url_ssl = l.upload_ssl_url
@@ -1285,12 +1289,14 @@ class CywInterface:
         l.download_thread.join()
         l.upload_thread_running = False
         l.upload_thread.join()
-        l.master_thread_running = False
-        l.master_thread.join()
         l.websocket_thread_running = False
         l.websocket_thread.join()
-        if l.connection_status_callback is not None:
-            l.connection_status_callback(False)
+        l.master_thread_running = False
+        l.master_thread.join()
+        if self.connected:
+            self.connected = False
+            if l.connection_status_callback is not None:
+                l.connection_status_callback(False)
 
     def convert_error_code_to_string(self, error_code):
         """Return a string with the description for an error code
@@ -1506,8 +1512,8 @@ class CywInterface:
                                             on_close = self.websocket_onclose)
                             l.websocket.on_open = self.websocket_onopen
                             l.websocket.run_forever()
+                            l.logger.debug('WebSocket connection returned')
                             l.websocket_state = l.constants.ws_state_waiting_for_connection
-                            # l.master_vars.wait_before_retry = self.get_epoch_time() + 5
                         except:
                             l.logger.debug('Error opening WebSocket connection')
                             time.sleep(1)
