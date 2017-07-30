@@ -78,6 +78,7 @@ class client:
             self.__io.write('login: ')
             while True:
                 line = self.__io.reader.readline()
+                print 'got a line ' + line
                 if line is None:
                     break
                 line = line.rstrip('\r\n')
@@ -100,7 +101,7 @@ class client:
 
         while not self.__is_authenticated and attempt < MAX_AUTH_ATTEMPTS:
             if (os.times()[4] - self.__spawn_time) > 60: # 60 seconds allowed for login process
-                self.__io.write('Your connection timed out.\n')
+                self.__io.write('Your connection timed out.\r\n')
                 return
             
             attempt += 1
@@ -111,7 +112,7 @@ class client:
             password = ''
         
             logger.info('Requesting password from client, attempt %d/%d...' % (attempt, MAX_AUTH_ATTEMPTS))
-            self.__io.write('password: ') #send only takes string
+            self.__io.write('\r\npassword: ') #send only takes string
             while True:
                 line = self.__io.reader.readline()
                 if line is None:
@@ -125,7 +126,7 @@ class client:
                     except KeyError:
                         logger.info('Client user (%s) did not exist in shadowpassword file.' % self.__username)
                         time.sleep(3)
-                        self.__io.write('Permission denied, please try again.\n')
+                        self.__io.write('Permission denied, please try again.\r\n')
                         break
                     
                     salt = crypted.rsplit('$', 1)[0] + '$'
@@ -138,9 +139,9 @@ class client:
                         logger.info('Client password for user (%s) incorrect.' % self.__username)
                         #time.sleep(3)
                         if attempt < MAX_AUTH_ATTEMPTS:
-                            self.__io.write('Permission denied, please try again.\n')
+                            self.__io.write('Permission denied, please try again.\r\n')
                         else:
-                            self.__io.write('Permission denied.\n')
+                            self.__io.write('Permission denied.\r\n')
 
                 break
         return self.__is_authenticated

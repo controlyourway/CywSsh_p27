@@ -34,7 +34,7 @@ class virtualterminal:
     """ Stops the worker's threads
     """
     def stop(self):
-        self.__write('Terminating session...\n')
+        self.__write('Terminating session...\r\n')
         self.__stop = True 
         
     """ The body of this worker
@@ -71,6 +71,7 @@ class virtualterminal:
                             if msg.endswith('\r'):
                                 msg = msg[:-1]
                             # user hit enter, lets pass everything they typed to the virtual terminal
+                            print 'received a newline - dumping to shell'
                             self.__write(self.__generate_promptstring())
                             pin.write(msg+'\n')
                             # clear the line buffer
@@ -135,7 +136,7 @@ class virtualterminal:
         
     def write(self, message):
         self.__write(self.__generate_promptstring())
-        self.pin.write(msg+'\n')
+        self.pin.write(msg+'\r\n')
         
     """ Constructs a Linux-bash style command prompt
     """
@@ -152,8 +153,8 @@ class virtualterminal:
             self.__write('\n')
             with open(WELCOME_MESSAGE_PATH, "r") as welcome_file:
                 for line in welcome_file:
-                    self.__write(line)
-            self.__write('\n\n')
+                    self.__write(line + '\r\n')
+            self.__write('\r\n\r\n')
             
         
     """ Demote child process to target user and group.
