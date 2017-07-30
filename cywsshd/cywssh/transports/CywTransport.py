@@ -1,6 +1,6 @@
 import logging
 import os
-import ControlYourWay_v1_p27
+import ControlYourWay_p27
 import random
 import re
 import string
@@ -22,7 +22,7 @@ class CywTransport:
         self.__secret = secret
 
     def initialize(self):
-        self.__cyw = ControlYourWay_v1_p27.CywInterface()
+        self.__cyw = ControlYourWay_p27.CywInterface()
         self.__cyw.set_user_name(self.__account_user)
         self.__cyw.set_network_password(self.__account_password)
         self.__cyw.set_network_names([self.__network])
@@ -57,7 +57,7 @@ class CywTransport:
                 new_client.start()
                 
                 # 3. send response back to network
-                send_data = ControlYourWay_v1_p27.CreateSendData()
+                send_data = ControlYourWay_p27.CreateSendData()
                 send_data.data = session_key
                 send_data.data_type = CYW_DT_DISCOVER_RESPONSE
                 if self.__cyw.connected:
@@ -93,7 +93,7 @@ class CywTransport:
             
         def write(self, line, data_type='RESP-SSQ'):
             try:
-                send_data = ControlYourWay_v1_p27.CreateSendData()
+                send_data = ControlYourWay_p27.CreateSendData()
                 send_data.data = line
                 send_data.data_type = data_type
                 if self.__cyw.connected:

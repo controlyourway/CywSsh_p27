@@ -12,7 +12,9 @@ exec 2>&1
 pip install websocket-client
 
 # extract scripts to sbin
-tar -xzvf cywsshd.tar.gz -C /usr/sbin/
+#tar -xzvf cywsshd.tar.gz -C /usr/sbin/
+# copy all the files to the correct folder
+yes | cp -rf ./cywssh/* /usr/sbin/
 
 echo -n "Enter your ControlYourWay username and press [ENTER]: "
 read username
