@@ -38,8 +38,8 @@ cat > /etc/cywsshd.config <<- EOM
     "cywuser": "$username",
     "cywpass": "$password",
     "cywnetwork": "$network",
-    "discoverPassword": "$discoverPassword",
-    "deviceName": "$deviceName"
+    "discoversecret": "$discoverPassword",
+    "devicename": "$deviceName"
 }
 EOM
 
