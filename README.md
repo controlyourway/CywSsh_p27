@@ -13,6 +13,8 @@ discarded.
 
 ## Install
 
+On Ubuntu, run the following command first to allow pip to install the correct Python libraries:
+**sudo apt-get install python-pip**
 Clone or download the files and go to the directory where the files are located. Run the following command:
 **sudo ./setup-cywsshd.sh**
 You will be asked for the following details during installation:

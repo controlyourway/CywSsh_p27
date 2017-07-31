@@ -15,6 +15,7 @@ systemctl disable cywssh.service
 rm /lib/systemd/system/cywssh.service
 rm /etc/cywsshd.config
 rm -r /usr/sbin/cywssh
+rm /usr/sbin/cywsshd.py
 
 systemctl daemon-reload
 systemctl reset-failed
