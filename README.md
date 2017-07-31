@@ -59,3 +59,7 @@ If you are having problems with this application it is handy to be able to run i
 If the credentials in cywsshd.config changes, you can restart the service by using:
 
 **service cywssh restart**
+
+To uninstall this application:
+
+**sudo ./uninstall.sh**
