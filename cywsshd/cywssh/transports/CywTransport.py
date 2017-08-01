@@ -11,15 +11,17 @@ logger = logging.getLogger('cywsshd')
 CYW_DT_DISCOVER_REQUEST = 'DISCOVER-ESH'
 CYW_DT_DISCOVER_RESPONSE = 'DISCOVER-RESPONSE-ESH'
 CYW_DT_SESSION = 'REQ-SSH:'
+CYW_DT_CONNECT = 'CONNECT-SSH'
 SESSION_KEY_LENGTH = 20
 
 class CywTransport:
-    def __init__(self, server, account_user, account_password, network, secret):
+    def __init__(self, server, account_user, account_password, network, secret, device_name):
         self.__server = server
         self.__account_user = account_user
         self.__account_password = account_password
         self.__network = network
         self.__secret = secret
+        self.__device_name = device_name;
 
     def initialize(self):
         self.__cyw = ControlYourWay_p27.CywInterface()
@@ -36,6 +38,7 @@ class CywTransport:
     def connection_status_callback(self, connected):
         if connected:  # connection was successful
             logger.info('Connection to ControlYourWay successful')
+            logger.info('Session ID: ' + str(self.__cyw.get_session_id()))
         else:
             logger.error('Unable to connect.')
             self.__cyw = None
@@ -48,21 +51,23 @@ class CywTransport:
             if data == self.__secret:
                 # respond with discovery result
                 # 1. generate 20-byte unique key
-                session_key = self.new_session_key()
-                
-                # 2. start a client instance for the new session-id
-                #logger.warn('No clients for incoming message on session-id %s' % session_id)
-                new_client = client(self.__server, CywTransport.IO(self.__cyw), session_key)
-                self.__server.add_client(new_client)
-                new_client.start()
+                self.__last_session_key = self.new_session_key()
                 
                 # 3. send response back to network
                 send_data = ControlYourWay_p27.CreateSendData()
-                send_data.data = session_key
+                send_data.data = self.__last_session_key + ',' + self.__device_name
                 send_data.data_type = CYW_DT_DISCOVER_RESPONSE
                 if self.__cyw.connected:
                     self.__cyw.send_data(send_data)
-
+        elif data_type == CYW_DT_CONNECT:
+            if data == self.__last_session_key:
+                # 2. start a client instance for the new session-id
+                # logger.warn('No clients for incoming message on session-id %s' % session_id)
+                new_client = client(self.__server, CywTransport.IO(self.__cyw), self.__last_session_key)
+                self.__server.add_client(new_client)
+                new_client.start()
+            else:
+                logger.warn('Invalid session key %s' % data)
         else:
             print data_type
             print data

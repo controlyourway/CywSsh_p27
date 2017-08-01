@@ -51,7 +51,7 @@ if "transports" in cfg:
     if "transports" in cfg and "CYW" in cfg["transports"]:
         # enable CYW as a physical transport layer
         logger.info("Constructing and registering CYW transport")
-        server.add_transport(CywTransport(server, cfg['cywuser'], cfg['cywpass'], cfg['cywnetwork'], cfg['cywdiscoversecret']))
+        server.add_transport(CywTransport(server, cfg['cywuser'], cfg['cywpass'], cfg['cywnetwork'], cfg['cywdiscoversecret'], cfg['cywdevicename']))
 else:
     logger.error('No transports have been configured. Re-run setup')
     sys.exit(-1)
