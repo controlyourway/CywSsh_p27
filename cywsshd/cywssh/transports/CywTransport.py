@@ -59,6 +59,8 @@ class CywTransport:
                 send_data.data_type = CYW_DT_DISCOVER_RESPONSE
                 if self.__cyw.connected:
                     self.__cyw.send_data(send_data)
+            else:
+                logger.info('Invalid secret key received')
         elif data_type == CYW_DT_CONNECT:
             if data == self.__last_session_key:
                 # 2. start a client instance for the new session-id
@@ -96,7 +98,7 @@ class CywTransport:
             r, w = os.pipe()
             self.reader, self.writer = os.fdopen(r, 'rU', 0), os.fdopen(w, 'w', 0)
             
-        def write(self, line, data_type='RESP-SSQ'):
+        def write(self, line, data_type='RESP-SSH'):
             try:
                 send_data = ControlYourWay_p27.CreateSendData()
                 send_data.data = line
