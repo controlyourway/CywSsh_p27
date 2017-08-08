@@ -332,16 +332,21 @@ class CywInterface:
         :param network_names: An array of network names
         :return: 0 if successful
         """
-        self.__locals.network_names = []
+        l = self.__locals
+        l.network_names = []
         for i in range(len(network_names)):
             # remove empty strings from array
             if len(network_names[i]) > 0:
-                self.__locals.network_names.append(network_names[i])
-        self.__locals.networks_updated = False
-        self.__locals.logger.debug('New network names set')
-        if self.__locals.cyw_state == self.__locals.constants.state_running:
-            # if service is already running then stop the download request so that new networks can be loaded
-            self.send_cancel_request()
+                l.network_names.append(network_names[i])
+        l.networks_updated = False
+        l.logger.debug('New network names set')
+        if l.cyw_state == l.constants.state_running:
+            if l.use_websocket:
+                if l.websocket_state == l.constants.ws_state_running:
+                    l.websocket_state = l.constants.ws_state_set_listen_to_networks
+            else:
+                # if service is already running then stop the download request so that new networks can be loaded
+                self.send_cancel_request()
         return '0'
 
     def get_network_names(self):
@@ -851,19 +856,13 @@ class CywInterface:
                     something_happened = True
                     l.websocket_state = l.constants.ws_state_connected_not_auth
                     m.waiting_for_response = False
-                if (m.wait_before_retry < self.get_epoch_time()) and \
-                        (l.websocket_state == l.constants.ws_state_connected_auth_sent):
-                    # authorisation sent but has timed out, send it again
-                    something_happened = True
-                    l.websocket_state = l.constants.ws_state_connected_not_auth
-                    m.waiting_for_response = False
                     l.logger.debug('WebSocket: Auth timed out, trying again')
                 if (m.wait_before_retry < self.get_epoch_time()) and \
                         (l.websocket_state == l.constants.ws_state_set_listen_to_networks_sent):
                     # no response when setting networks, try again
                     something_happened = True
                     m.waiting_for_response = False
-                    l.websocket_state = l.constants.ws_state_set_listen_to_networks_sent
+                    l.websocket_state = l.constants.ws_state_set_listen_to_networks
                     l.logger.debug('WebSocket: Setting networks timed out, trying again')
                 if (l.websocket_state == l.constants.ws_state_running) and \
                         (self.check_if_websocket_keep_alive_expired()):
@@ -914,9 +913,9 @@ class CywInterface:
                                             break
                                         else:
                                             session_id_str += l.device_id[i]
-                                    # store the errorCodes
+                                    # store the error codes
                                     store_error_codes = False
-                                    l.errorCodes = CreateCywDictionary()
+                                    l.error_codes = CreateCywDictionary()
                                     for ie in range(len(cyw_dict.keys)):
                                         if cyw_dict.keys[ie] == '0':
                                             # this is the first error code
@@ -1306,9 +1305,9 @@ class CywInterface:
         if self.__locals.error_codes is None:
             return error_code
         if type(error_code) is int:
-            error_code_num = error_code
+            error_code_num = str(error_code)
         elif type(error_code) is str:
-            error_code_num = int(error_code)
+            error_code_num = error_code
         else:
             return error_code
         error_str = CywInterface.get_cyw_dictionary_single_value(self.__locals.error_codes, error_code_num)
