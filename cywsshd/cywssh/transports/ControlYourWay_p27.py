@@ -300,6 +300,24 @@ class CywInterface:
             l.logger.addHandler(consolehandler)
             l.logger.setLevel(log_level)
 
+    def log_application_message(self, log_level, message):
+        """This function allows the application to log messages to the same log file used by CYW
+        :param log_level: The log level of the user message
+        :param message: The message that the user wants to log
+        """
+        mes = 'Application message: ' + message
+        l = self.__locals
+        if log_level == logging.DEBUG:
+            l.logger.debug(mes)
+        elif log_level == logging.INFO:
+            l.logger.info(mes)
+        elif log_level == logging.WARNING:
+            l.logger.warning(mes)
+        elif log_level == logging.ERROR:
+            l.logger.error(mes)
+        elif log_level == logging.CRITICAL:
+            l.logger.critical(mes)
+
     def set_user_name(self, user_name):
         """Change the user name. This can only be changed when the service is not started
         :param user_name: Email address that you used to register on www.controlyourway.com
@@ -1276,26 +1294,27 @@ class CywInterface:
             l.connection_status_callback = None
             l.error_callback = None
         l.closing_threads = True
-        l.download_thread_running = False
-        if l.cyw_state == l.constants.state_running:
-            if l.use_websocket:
-                l.websocket.send('~c=t' + l.constants.terminating_string)  # send websocket termination message
-                l.websocket_state = l.constants.ws_state_closing_connection
-                l.logger.debug('WebSocket: Close connection message sent')
-            else:
-                self.send_cancel_request(True)
-                l.logger.debug('Long polling: Close connection message sent')
-        l.download_thread.join()
-        l.upload_thread_running = False
-        l.upload_thread.join()
-        l.websocket_thread_running = False
-        l.websocket_thread.join()
-        l.master_thread_running = False
-        l.master_thread.join()
-        if self.connected:
-            self.connected = False
-            if l.connection_status_callback is not None:
-                l.connection_status_callback(False)
+        if l.download_thread_running:  #check if threads are running
+            l.download_thread_running = False
+            if l.cyw_state == l.constants.state_running:
+                if l.use_websocket:
+                    l.websocket.send('~c=t' + l.constants.terminating_string)  # send websocket termination message
+                    l.websocket_state = l.constants.ws_state_closing_connection
+                    l.logger.debug('WebSocket: Close connection message sent')
+                else:
+                    self.send_cancel_request(True)
+                    l.logger.debug('Long polling: Close connection message sent')
+            l.download_thread.join()
+            l.upload_thread_running = False
+            l.upload_thread.join()
+            l.websocket_thread_running = False
+            l.websocket_thread.join()
+            l.master_thread_running = False
+            l.master_thread.join()
+            if self.connected:
+                self.connected = False
+                if l.connection_status_callback is not None:
+                    l.connection_status_callback(False)
 
     def convert_error_code_to_string(self, error_code):
         """Return a string with the description for an error code
@@ -1518,7 +1537,7 @@ class CywInterface:
                             time.sleep(1)
             time.sleep(0.1)
         l.websocket_thread_terminated = True
-        l.logger.info('WebSocket thread exit')
+        l.logger.debug('WebSocket thread terminated')
 
     def process_websocket_rec_data(self):
         l = self.__locals
