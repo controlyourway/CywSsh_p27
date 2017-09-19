@@ -79,6 +79,7 @@ class CywConstants:
         self.download_decrease_time = 10
         self.state_request_credentials = 0
         self.state_running = 1
+        self.wait_before_retry_timeout = 5
 
         self.ws_state_not_connected = 0
         self.ws_state_connected_not_auth = 1
@@ -632,7 +633,12 @@ class CywInterface:
         l.logger.info('Master thread started')
         while l.master_thread_running:
             something_happened = False
-            if not m.waiting_for_response:
+            if m.waiting_for_response:
+                if m.wait_before_retry < self.get_epoch_time():
+                    something_happened = True
+                    m.waiting_for_response = False
+                    l.logger.error('Waiting for response timed out')
+            else:
                 if l.cyw_state == l.constants.state_request_credentials and not l.closing_threads:
                     # check if enough time elapsed between retries to not swamp the server
                     if m.wait_before_retry < self.get_epoch_time():
@@ -642,7 +648,7 @@ class CywInterface:
                             self.connected = False
                             if l.connection_status_callback is not None:
                                 l.connection_status_callback(False)
-                        m.wait_before_retry = self.get_epoch_time() + 5
+                        m.wait_before_retry = self.get_epoch_time() + l.constants.wait_before_retry_timeout
                         m.waiting_for_response = True
                         send_packet = CywNewInstance()
                         if l.constants.use_test_server:
@@ -671,12 +677,12 @@ class CywInterface:
                         if l.websocket_state == l.constants.ws_state_connected_not_auth:
                             l.websocket.send(l.auth_params + l.constants.terminating_string)
                             l.websocket_state = l.constants.ws_state_connected_auth_sent
-                            m.wait_before_retry = self.get_epoch_time() + 5
+                            m.wait_before_retry = self.get_epoch_time() +  + l.constants.wait_before_retry_timeout
                             m.waiting_for_response = True
                             something_happened = True
                             l.logger.debug('WebSocket: Send connection auth message')
                         elif l.websocket_state == l.constants.ws_state_set_listen_to_networks:
-                            m.wait_before_retry = self.get_epoch_time() + 5
+                            m.wait_before_retry = self.get_epoch_time() +  + l.constants.wait_before_retry_timeout
                             m.waiting_for_response = True
                             something_happened = True
                             l.websocket_state = l.constants.ws_state_set_listen_to_networks_sent
@@ -691,6 +697,7 @@ class CywInterface:
                         # try again with packet that failed previously
                         l.to_cloud_queue.put(m.send_packet)
                         m.waiting_for_response = True
+                        m.wait_before_retry = self.get_epoch_time() + l.constants.wait_before_retry_timeout
                         l.logger.debug('Try to send packet again')
                     # check if there is new data to send
                     elif not l.to_master_for_cloud_queue.empty():
@@ -773,6 +780,7 @@ class CywInterface:
                             l.logger.debug('Long Polling: Sending packet')
                         l.counters.upload += 1
                         m.waiting_for_response = True
+                        m.wait_before_retry = self.get_epoch_time() + l.constants.wait_before_retry_timeout
             # //////////////////////////////////////////////////////////////////////////////////////////////
             # process data received from web socket
             if not l.websocket_receive_queue.empty():
@@ -920,6 +928,7 @@ class CywInterface:
                         l.websocket_state = l.constants.ws_state_not_connected
                         l.websocket.close()
                         l.logger.debug('WebSocket: Timeout, restarting connection')
+                        m.waiting_for_response = False
             # //////////////////////////////////////////////////////////////////////////////////////////////
             # see if response from toCloud thread
             if not l.from_to_cloud_to_master_queue.empty():
@@ -1322,9 +1331,13 @@ class CywInterface:
             l.download_thread_running = False
             if l.cyw_state == l.constants.state_running:
                 if l.use_websocket:
-                    l.websocket.send('~c=t' + l.constants.terminating_string)  # send websocket termination message
-                    l.websocket_state = l.constants.ws_state_closing_connection
-                    l.logger.debug('WebSocket: Close connection message sent')
+                    try:
+                        l.websocket.send('~c=t' + l.constants.terminating_string)  # send websocket termination message
+                        l.websocket_state = l.constants.ws_state_closing_connection
+                        l.logger.debug('WebSocket: Close connection message sent')
+                    except Exception, e:
+                        l.logger.error('Error closing WebSocket connection: ' + str(e))
+                        l.websocket_state = l.constants.ws_state_not_connected
                 else:
                     self.send_cancel_request(True)
                     l.logger.debug('Long polling: Close connection message sent')
