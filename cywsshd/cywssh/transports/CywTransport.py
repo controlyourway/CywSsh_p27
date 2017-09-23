@@ -4,12 +4,14 @@ import ControlYourWay_p27
 import random
 import re
 import string
+import socket
 from ..client import *
+
 
 logger = logging.getLogger('cywsshd')
 
-CYW_DT_DISCOVER_REQUEST = 'DISCOVER-SSH'
-CYW_DT_DISCOVER_RESPONSE = 'DISCOVER-RESPONSE-SSH'
+CYW_DT_DISCOVER_REQUEST = 'DISCOVER-ESH'
+CYW_DT_DISCOVER_RESPONSE = 'DISCOVER-RESPONSE-ESH'
 CYW_DT_SESSION = 'REQ-SSH:'
 CYW_DT_CONNECT = 'CONNECT-SSH'
 SESSION_KEY_LENGTH = 20
@@ -47,8 +49,10 @@ class CywTransport:
         return ''.join(random.SystemRandom().choice(string.ascii_uppercase + string.digits) for _ in range(SESSION_KEY_LENGTH))
 
     def data_received_callback(self, data, data_type, from_who):
+        #print '**** %s %s %s' % (`data`, `data_type`, `from_who`)
         if data_type == CYW_DT_DISCOVER_REQUEST:
             if data == self.__secret:
+                print 'matching'
                 # respond with discovery result
                 # 1. generate 20-byte unique key
                 self.__last_session_key = self.new_session_key()
@@ -57,6 +61,7 @@ class CywTransport:
                 send_data = ControlYourWay_p27.CreateSendData()
                 send_data.data = self.__last_session_key + ',' + self.__device_name
                 send_data.data_type = CYW_DT_DISCOVER_RESPONSE
+                print 'responding with ' + send_data.data
                 if self.__cyw.connected:
                     self.__cyw.send_data(send_data)
             else:
@@ -71,9 +76,6 @@ class CywTransport:
             else:
                 logger.warn('Invalid session key %s' % data)
         else:
-            print data_type
-            print data
-            print '----'
             data_type_match = re.match("^"+CYW_DT_SESSION+"([^ ]+)", data_type)
             if data_type_match is not None:
                 session_id = data_type_match.group(1)
@@ -84,19 +86,32 @@ class CywTransport:
                     logger.warn('No clients for incoming message on session-id %s' % session_id)
                 else:
                     logger.debug('Incoming message on session-id %s' % session_id)
-                    existing_client.get_io().writer.write(data)
+                    existing_client.get_io().enqueue(data)
                     # echo back
-                    existing_client.get_io().write(data)
+                    #existing_client.get_io().write(data)
 
     def close(self):
         self.reader.close()
         self.writer.close()
 
     class IO:
+        echo_substitute = None
+        
         def __init__(self, cyw):
             self.__cyw = cyw
             r, w = os.pipe()
-            self.reader, self.writer = os.fdopen(r, 'rU', 0), os.fdopen(w, 'w', 0)
+            self.reader, self.__writer = os.fdopen(r, 'rU', 0), os.fdopen(w, 'w', 0)
+            
+        ### fill the pipe with data that will be processed by any listening threads.
+        def enqueue(self, data):
+            self.__writer.write(data)
+            echo_char = self.echo_substitute
+            if echo_char is not None:
+                print 'we have an echo substitue'
+                non_whitespace = data.translate(None, ' \n\t\r')
+                self.write(echo_char * len(non_whitespace))
+            else:
+                self.write(data)
             
         def write(self, line, data_type='RESP-SSH'):
             try:
@@ -108,6 +123,22 @@ class CywTransport:
             except socket.error:
                 logger.error(traceback.format_exc())
             
+        def readline(self, timeout=0):
+            rs, ws, es = select([self.reader], [], [], timeout)
+            line = ''
+            c = None
+            while c != '\n':
+                if not (rs or ws or es):
+                        raise socket.timeout()
+                if self.reader in rs:
+                    c = self.reader.read(1)
+                    if c != '\n':
+                        line += c
+            return line
+            
         def close(self):
+            print 'sending close comand to server'
+            # send disconnect notification to server
+            self.write('closing connection', data_type='CLOSE-SSH')
             self.reader.close()
             self.writer.close()

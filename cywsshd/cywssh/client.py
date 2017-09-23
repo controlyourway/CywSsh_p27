@@ -3,6 +3,7 @@ import logging
 import os
 import spwd
 import time
+import socket
 
 from thread import *
 from virtualterminal import *
@@ -11,6 +12,7 @@ logger = logging.getLogger('cywsshd')
 
 MAX_USERNAME_ATTEMPTS = 10
 MAX_AUTH_ATTEMPTS = 3
+TIMEOUT_AUTH = 10
 
 class client:
     __is_authenticated = False
@@ -52,7 +54,9 @@ class client:
             except:
                 logger.error(traceback.format_exc())
             
-            self.__io.close()
+            print 'sending close message'
+            self.__io.write('closing connection', data_type='CLOSE-SSH')
+            #self.__io.close()
             self.__server.remove_client(self)
         except:
             logger.error(traceback.format_exc())
@@ -77,17 +81,25 @@ class client:
             logger.info('Requesting username from client, attempt %d/%d...' % (attempt, MAX_USERNAME_ATTEMPTS))
             self.__io.write('login: ')
             while True:
-                line = self.__io.reader.readline()
-                print 'got a line ' + line
-                if line is None:
+                #line = self.__io.reader.readline()
+                try:
+                    line = self.__io.readline(timeout=TIMEOUT_AUTH)
+                    print 'got a line ' + line
+                    if line is None:
+                        break
+                    line = line.rstrip('\r\n')
+                    if line is not None and line <> '':
+                        self.__username = line
+                        logger.info('Client provided a username: %s' % self.__username)
+                    else:
+                        logger.info('Client provided a blank username.')
                     break
-                line = line.rstrip('\r\n')
-                if line is not None and line <> '':
-                    self.__username = line
-                    logger.info('Client provided a username: %s' % self.__username)
-                else:
-                    logger.info('Client provided a blank username.')
-                break
+                except socket.timeout:
+                    logger.info('Timeout while reading username.')
+                    # explicitly exhaust the retry attempts
+                    attempt = MAX_USERNAME_ATTEMPTS
+                    self.__io.write('Your connection timed out.')
+                    break;
         return self.__username is not None and self.__username != ''
 
     def report_ids(self, msg):
@@ -100,10 +112,6 @@ class client:
             return
 
         while not self.__is_authenticated and attempt < MAX_AUTH_ATTEMPTS:
-            if (os.times()[4] - self.__spawn_time) > 60: # 60 seconds allowed for login process
-                self.__io.write('Your connection timed out.\r\n')
-                return
-            
             attempt += 1
             
             if self.__username == '':
@@ -113,35 +121,45 @@ class client:
         
             logger.info('Requesting password from client, attempt %d/%d...' % (attempt, MAX_AUTH_ATTEMPTS))
             self.__io.write('\r\npassword: ') #send only takes string
-            while True:
-                line = self.__io.reader.readline()
-                if line is None:
-                    break
-                if line is not None:
-                    logger.info('Client provided a password')
-                    line = line.rstrip('\r\n')
-                    # get crypt password for user account
+            print 'setting echo substitiue'
+            self.__io.echo_substitute = '*' # echo asterisks for password
+            try:
+                while True:
                     try:
-                        crypted = spwd.getspnam(self.__username)[1]
-                    except KeyError:
-                        logger.info('Client user (%s) did not exist in shadowpassword file.' % self.__username)
-                        time.sleep(3)
-                        self.__io.write('Permission denied, please try again.\r\n')
-                        break
-                    
-                    salt = crypted.rsplit('$', 1)[0] + '$'
-                    cryptline = crypt.crypt(line, salt)
-                    if cryptline == crypted:
-                        logger.info('Client password for user (%s) correct.' % self.__username)
-                        # successful auth
-                        self.__is_authenticated = True
-                    else:
-                        logger.info('Client password for user (%s) incorrect.' % self.__username)
-                        #time.sleep(3)
-                        if attempt < MAX_AUTH_ATTEMPTS:
-                            self.__io.write('Permission denied, please try again.\r\n')
-                        else:
-                            self.__io.write('Permission denied.\r\n')
-
-                break
+                        line = self.__io.readline(timeout=TIMEOUT_AUTH)
+                        if line is None:
+                            break
+                        if line is not None:
+                            logger.info('Client provided a password')
+                            line = line.rstrip('\r\n')
+                            # get crypt password for user account
+                            try:
+                                crypted = spwd.getspnam(self.__username)[1]
+                            except KeyError:
+                                logger.info('Client user (%s) did not exist in shadowpassword file.' % self.__username)
+                                time.sleep(3)
+                                self.__io.write('Permission denied, please try again.\r\n')
+                                break
+                            
+                            salt = crypted.rsplit('$', 1)[0] + '$'
+                            cryptline = crypt.crypt(line, salt)
+                            if cryptline == crypted:
+                                logger.info('Client password for user (%s) correct.' % self.__username)
+                                # successful auth
+                                self.__is_authenticated = True
+                            else:
+                                logger.info('Client password for user (%s) incorrect.' % self.__username)
+                                #time.sleep(3)
+                                if attempt < MAX_AUTH_ATTEMPTS:
+                                    self.__io.write('Permission denied, please try again.\r\n')
+                                else:
+                                    self.__io.write('Permission denied.\r\n')
+                    except socket.timeout:
+                        # explicitly exhaust the retry attempts
+                        attempt = MAX_USERNAME_ATTEMPTS
+                        logger.info('Timeout while reading password.')
+                        self.__io.write('Your connection timed out.')
+                    break
+            finally:
+                self.__io.echo_substitute = None
         return self.__is_authenticated

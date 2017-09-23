@@ -6,6 +6,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 from cywssh import *
 from cywssh.transports import *
+import socket
 
 LOG_FILENAME = '/var/log/cywsshd.log'
 
@@ -25,6 +26,11 @@ logger.addHandler(consolehandler)
 
 logger.setLevel(logging.DEBUG)
 
+# try:
+#     raise socket.timeout('ss')
+# except socket.timeout:
+#     print 'got a timeout'
+    
 def signal_handler(signal, frame):
     logger.info('Shutting down')
     server.stop()
