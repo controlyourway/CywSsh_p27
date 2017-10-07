@@ -45,9 +45,11 @@ class virtualterminal:
         errmsg = ''
         try:
             while not self.__stop:
+                print '--- waiting to read'
                 # read from the socket, terminal stdin, or terminal stdout, whichever produces data first
-                rs, ws, es = select([sock_reader, process.stdout, process.stderr], [], [])
-    
+                rs, ws, es = select([sock_reader, process.stdout, process.stderr], [], [], 1)
+                print '--- FINIDED waiting to read'
+                
                 for r in rs:
                     if r is sock_reader: # data arrived from socket
                         # read the data
@@ -96,7 +98,7 @@ class virtualterminal:
                             errmsg = ''        
         except Exception as e:
             logger.error(traceback.format_exc())
-            
+        print 'exiting terminal reader loop'
         process.stdout.close()
         process.stderr.close()
         self.__evt_stopping.set()

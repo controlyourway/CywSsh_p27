@@ -10,10 +10,12 @@ from ..client import *
 
 logger = logging.getLogger('cywsshd')
 
-CYW_DT_DISCOVER_REQUEST = 'DISCOVER-ESH'
-CYW_DT_DISCOVER_RESPONSE = 'DISCOVER-RESPONSE-ESH'
-CYW_DT_SESSION = 'REQ-SSH:'
+CYW_DT_DISCOVER_REQUEST = 'DISCOVER-SSH'
+CYW_DT_DISCOVER_RESPONSE = 'DISCOVER-RESPONSE-SSH'
+CYW_DT_SESSION = 'REQ-SSH'
 CYW_DT_CONNECT = 'CONNECT-SSH'
+CYW_DT_CLOSE = 'CLOSE-SSH'
+
 SESSION_KEY_LENGTH = 20
 
 class CywTransport:
@@ -24,6 +26,7 @@ class CywTransport:
         self.__network = network
         self.__secret = secret
         self.__device_name = device_name;
+        self.__pending_session_keys = [] # a list of session keys that MAY be turned into client objects, should a DISCOVER be escalated to a CONNECT
 
     def initialize(self):
         self.__cyw = ControlYourWay_p27.CywInterface()
@@ -45,54 +48,71 @@ class CywTransport:
             logger.error('Unable to connect.')
             self.__cyw = None
         
-    def new_session_key(self):
+    def generate_session_key(self):
         return ''.join(random.SystemRandom().choice(string.ascii_uppercase + string.digits) for _ in range(SESSION_KEY_LENGTH))
 
     def data_received_callback(self, data, data_type, from_who):
-        #print '**** %s %s %s' % (`data`, `data_type`, `from_who`)
-        if data_type == CYW_DT_DISCOVER_REQUEST:
+        print '**** %s %s %s' % (`data`, `data_type`, `from_who`)
+        data_type_match = re.match("^([^:]+)(:(.+))?$", data_type)
+        split_data_type = data_type_match.group(1)
+        print '---- ' + split_data_type
+        if split_data_type == CYW_DT_CLOSE:
+            print 'close request'  
+            session_id = data_type_match.group(3)
+            
+            existing_client = self.__server.client_by_session(session_id)
+            
+            if existing_client is None:
+                logger.warn('No clients for incoming message on session-id %s' % session_id)
+            else:
+                existing_client.stop()
+
+        elif split_data_type == CYW_DT_DISCOVER_REQUEST:
             if data == self.__secret:
                 print 'matching'
                 # respond with discovery result
                 # 1. generate 20-byte unique key
-                self.__last_session_key = self.new_session_key()
+                new_session_key = self.generate_session_key()
+                self.__pending_session_keys.append(new_session_key)
                 
                 # 3. send response back to network
                 send_data = ControlYourWay_p27.CreateSendData()
-                send_data.data = self.__last_session_key + ',' + self.__device_name
+                send_data.data = new_session_key + ',' + self.__device_name
                 send_data.data_type = CYW_DT_DISCOVER_RESPONSE
                 print 'responding with ' + send_data.data
                 if self.__cyw.connected:
                     self.__cyw.send_data(send_data)
             else:
                 logger.info('Invalid secret key received')
-        elif data_type == CYW_DT_CONNECT:
-            if data == self.__last_session_key:
+        elif split_data_type == CYW_DT_CONNECT:
+            if data in self.__pending_session_keys:
+                # remove the session key so it cannot be used again for another connection attempt.
+                self.__pending_session_keys.remove(data)
                 # 2. start a client instance for the new session-id
                 # logger.warn('No clients for incoming message on session-id %s' % session_id)
-                new_client = client(self.__server, CywTransport.IO(self.__cyw), self.__last_session_key)
+                new_client = client(self.__server, CywTransport.IO(self.__cyw), data)
                 self.__server.add_client(new_client)
                 new_client.start()
             else:
                 logger.warn('Invalid session key %s' % data)
-        else:
-            data_type_match = re.match("^"+CYW_DT_SESSION+"([^ ]+)", data_type)
-            if data_type_match is not None:
-                session_id = data_type_match.group(1)
-                
-                existing_client = self.__server.client_by_session(session_id)
-                
-                if existing_client is None:
-                    logger.warn('No clients for incoming message on session-id %s' % session_id)
-                else:
-                    logger.debug('Incoming message on session-id %s' % session_id)
-                    existing_client.get_io().enqueue(data)
-                    # echo back
-                    #existing_client.get_io().write(data)
+        elif split_data_type == CYW_DT_SESSION:
+            # data_type_match = re.match("^"+CYW_DT_SESSION+"([^ ]+)", data_type)
+            # if data_type_match is not None:
+            session_id = data_type_match.group(3)
+            
+            existing_client = self.__server.client_by_session(session_id)
+            
+            if existing_client is None:
+                logger.warn('No clients for incoming message on session-id %s' % session_id)
+            else:
+                logger.debug('Incoming message on session-id %s' % session_id)
+                existing_client.get_io().enqueue(data)
+                # echo back
+                #existing_client.get_io().write(data)
 
-    def close(self):
-        self.reader.close()
-        self.writer.close()
+    # def close(self):
+    #     self.reader.close()
+    #     self.writer.close()
 
     class IO:
         echo_substitute = None
@@ -141,4 +161,5 @@ class CywTransport:
             # send disconnect notification to server
             self.write('closing connection', data_type='CLOSE-SSH')
             self.reader.close()
-            self.writer.close()
+            self.__writer.close()
+            print 'all done'
