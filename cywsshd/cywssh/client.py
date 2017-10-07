@@ -34,9 +34,7 @@ class client:
     """ Stops the worker's threads
     """
     def stop(self):
-        print 'client asking terminal to stop'
         self.__terminal.stop()
-        self.__io.close()
         self.__conn = None
         
     """ The body of this worker
@@ -54,9 +52,9 @@ class client:
             except:
                 logger.error(traceback.format_exc())
             
-            print 'sending close message'
-            self.__io.write('closing connection', data_type='CLOSE-SSH')
-            #self.__io.close()
+            #self.__io.write('closing connection', data_type='CLOSE-SSH')
+            self.__io.close()
+            logger.debug('Removing client object from cache.')
             self.__server.remove_client(self)
         except:
             logger.error(traceback.format_exc())
@@ -84,7 +82,6 @@ class client:
                 #line = self.__io.reader.readline()
                 try:
                     line = self.__io.readline(timeout=TIMEOUT_AUTH)
-                    print 'got a line ' + line
                     if line is None:
                         break
                     line = line.rstrip('\r\n')
@@ -121,7 +118,6 @@ class client:
         
             logger.info('Requesting password from client, attempt %d/%d...' % (attempt, MAX_AUTH_ATTEMPTS))
             self.__io.write('\r\npassword: ') #send only takes string
-            print 'setting echo substitiue'
             self.__io.echo_substitute = '*' # echo asterisks for password
             try:
                 while True:

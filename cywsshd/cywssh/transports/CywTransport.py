@@ -12,9 +12,10 @@ logger = logging.getLogger('cywsshd')
 
 CYW_DT_DISCOVER_REQUEST = 'DISCOVER-SSH'
 CYW_DT_DISCOVER_RESPONSE = 'DISCOVER-RESPONSE-SSH'
-CYW_DT_SESSION = 'REQ-SSH'
+CYW_DT_REQUEST = 'REQ-SSH'
+CYW_DT_RESPONSE = 'RESP-SSH'
 CYW_DT_CONNECT = 'CONNECT-SSH'
-CYW_DT_CLOSE = 'CLOSE-SSH'
+CYW_DT_CLOSE = 'CLOSE-SSH:'
 
 SESSION_KEY_LENGTH = 20
 
@@ -52,12 +53,9 @@ class CywTransport:
         return ''.join(random.SystemRandom().choice(string.ascii_uppercase + string.digits) for _ in range(SESSION_KEY_LENGTH))
 
     def data_received_callback(self, data, data_type, from_who):
-        print '**** %s %s %s' % (`data`, `data_type`, `from_who`)
         data_type_match = re.match("^([^:]+)(:(.+))?$", data_type)
         split_data_type = data_type_match.group(1)
-        print '---- ' + split_data_type
         if split_data_type == CYW_DT_CLOSE:
-            print 'close request'  
             session_id = data_type_match.group(3)
             
             existing_client = self.__server.client_by_session(session_id)
@@ -65,11 +63,11 @@ class CywTransport:
             if existing_client is None:
                 logger.warn('No clients for incoming message on session-id %s' % session_id)
             else:
+                logger.info('Client requested connection be closed...')
                 existing_client.stop()
 
         elif split_data_type == CYW_DT_DISCOVER_REQUEST:
             if data == self.__secret:
-                print 'matching'
                 # respond with discovery result
                 # 1. generate 20-byte unique key
                 new_session_key = self.generate_session_key()
@@ -79,13 +77,13 @@ class CywTransport:
                 send_data = ControlYourWay_p27.CreateSendData()
                 send_data.data = new_session_key + ',' + self.__device_name
                 send_data.data_type = CYW_DT_DISCOVER_RESPONSE
-                print 'responding with ' + send_data.data
                 if self.__cyw.connected:
                     self.__cyw.send_data(send_data)
             else:
                 logger.info('Invalid secret key received')
         elif split_data_type == CYW_DT_CONNECT:
             if data in self.__pending_session_keys:
+                logger.debug('CONNECT request with secret %s' % data)
                 # remove the session key so it cannot be used again for another connection attempt.
                 self.__pending_session_keys.remove(data)
                 # 2. start a client instance for the new session-id
@@ -95,9 +93,7 @@ class CywTransport:
                 new_client.start()
             else:
                 logger.warn('Invalid session key %s' % data)
-        elif split_data_type == CYW_DT_SESSION:
-            # data_type_match = re.match("^"+CYW_DT_SESSION+"([^ ]+)", data_type)
-            # if data_type_match is not None:
+        elif split_data_type == CYW_DT_REQUEST:
             session_id = data_type_match.group(3)
             
             existing_client = self.__server.client_by_session(session_id)
@@ -127,13 +123,14 @@ class CywTransport:
             self.__writer.write(data)
             echo_char = self.echo_substitute
             if echo_char is not None:
-                print 'we have an echo substitue'
                 non_whitespace = data.translate(None, ' \n\t\r')
                 self.write(echo_char * len(non_whitespace))
             else:
                 self.write(data)
             
-        def write(self, line, data_type='RESP-SSH'):
+        def write(self, line, data_type=CYW_DT_RESPONSE):
+            if self.__writer == None:
+                return
             try:
                 send_data = ControlYourWay_p27.CreateSendData()
                 send_data.data = line
@@ -157,9 +154,9 @@ class CywTransport:
             return line
             
         def close(self):
-            print 'sending close comand to server'
             # send disconnect notification to server
-            self.write('closing connection', data_type='CLOSE-SSH')
+            self.write('closing connection', data_type=CYW_DT_CLOSE)
             self.reader.close()
             self.__writer.close()
-            print 'all done'
+            self.reader = None
+            self.__writer = None
