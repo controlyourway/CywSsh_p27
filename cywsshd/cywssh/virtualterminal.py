@@ -46,8 +46,9 @@ class virtualterminal:
         sock_reader = self.__manager.get_io().reader
         msg = ''
         errmsg = ''
-        try:
-            while not self.__stop:
+        while not self.__stop:
+            try:
+                
                 # read from the socket, terminal stdin, or terminal stdout, whichever produces data first
                 rs, ws, es = select([sock_reader, process.stdout, process.stderr], [], [], 1)
                 for r in rs:
@@ -66,20 +67,23 @@ class virtualterminal:
                             self.__write('\r\n')
                             self.stop()
                             break
-                        #elif c == '':
-                        #    print 'HERERERER'
-                        #    msg = msg[:-1]
-                        #    break
+                        # elif c == '':
+                        #     print 'HERERERER'
+                        #     pin.write(c)
+                        #     pin.write("\x1B[D")
+                            
+                        # #    msg = msg[:-1]
+                        #     break
                         else:
                             children = parent.children(recursive=False)
                             if len(children) == 0: # echo back to client
                                 self.__write(c.replace('\n', '\r\n'))
-
+    
                             pin.write(c)
                             sys.stdout.flush()
                             children = parent.children(recursive=False)
                             self.__manager.get_io().echo(len(children) == 0)
-
+    
                     elif r in [process.stdout, process.stderr]: # data arrived from terminal
                         max = 100
                         def readAllSoFar(stream, max, retVal=''): 
@@ -91,7 +95,7 @@ class virtualterminal:
                                     retVal+=c
                             return retVal
                         proc_response = readAllSoFar(r, max)
-
+    
                         if len(proc_response) == 0:
                             self.stop()
                             break
@@ -119,8 +123,9 @@ class virtualterminal:
                     #     if errmsg.endswith('\n'):
                     #         self.__write('%s' % errmsg)
                     #         errmsg = ''  
-        except Exception as e:
-            logger.error(traceback.format_exc())
+            except Exception as e:
+                self.__write('\r\nINTERNAL SERVER ERROR: %s\r\n' % e) #send only takes string
+                logger.error(traceback.format_exc())
             
         logger.info('Virtual Terminal has exited.')
         process.stdout.close()
