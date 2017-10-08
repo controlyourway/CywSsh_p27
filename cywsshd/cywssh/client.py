@@ -81,6 +81,7 @@ class client:
             while True:
                 #line = self.__io.reader.readline()
                 try:
+                    self.__io.echo(True)
                     line = self.__io.readline(timeout=TIMEOUT_AUTH)
                     if line is None:
                         break
@@ -95,8 +96,10 @@ class client:
                     logger.info('Timeout while reading username.')
                     # explicitly exhaust the retry attempts
                     attempt = MAX_USERNAME_ATTEMPTS
-                    self.__io.write('Your connection timed out.')
+                    self.__io.write('\r\nYour connection timed out.')
                     break;
+                finally:
+                    self.__io.echo(False)
         return self.__username is not None and self.__username != ''
 
     def report_ids(self, msg):
@@ -117,12 +120,12 @@ class client:
             password = ''
         
             logger.info('Requesting password from client, attempt %d/%d...' % (attempt, MAX_AUTH_ATTEMPTS))
-            self.__io.write('\r\npassword: ') #send only takes string
+            self.__io.write('password: ') #send only takes string
             self.__io.echo_substitute = '*' # echo asterisks for password
             try:
                 while True:
                     try:
-                        line = self.__io.readline(timeout=TIMEOUT_AUTH)
+                        line = self.__io.readline(timeout=TIMEOUT_AUTH, substitute='*')
                         if line is None:
                             break
                         if line is not None:

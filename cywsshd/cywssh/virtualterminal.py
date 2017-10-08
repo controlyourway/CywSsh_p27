@@ -6,6 +6,8 @@ import pwd
 import sys
 import traceback
 import tty
+import time
+import psutil
 
 from select import select
 from subprocess import Popen, PIPE
@@ -40,6 +42,7 @@ class virtualterminal:
     """ The body of this worker
     """
     def __run(self, process, pin):
+        parent = psutil.Process(process.pid)
         sock_reader = self.__manager.get_io().reader
         msg = ''
         errmsg = ''
@@ -47,7 +50,6 @@ class virtualterminal:
             while not self.__stop:
                 # read from the socket, terminal stdin, or terminal stdout, whichever produces data first
                 rs, ws, es = select([sock_reader, process.stdout, process.stderr], [], [], 1)
-
                 for r in rs:
                     if r is sock_reader: # data arrived from socket
                         # read the data
@@ -58,46 +60,72 @@ class virtualterminal:
                             self.stop()
                             break
                         elif ord(c) == 4: # ord(c) of 4 means CTRL^D
-                            # a data-length of 0 means that the socket failed to read, must be closed
-                            # exit the handler thread
+                        #     # a data-length of 0 means that the socket failed to read, must be closed
+                        #     # exit the handler thread
+                            logger.info('Received CTRL^D, terminating terminal...')
+                            self.__write('\r\n')
                             self.stop()
-                            pin.write(c) # pass on the character
                             break
-                        elif c == '':
-                            msg = msg[:-1]
-                            break
-                        elif c == '\n':
-                            # deal with clients which send \r\n as terminator - strip the \r
-                            if msg.endswith('\r'):
-                                msg = msg[:-1]
-                            # user hit enter, lets pass everything they typed to the virtual terminal
-                            print 'received a newline - dumping to shell'
-                            self.__write(self.__generate_promptstring())
-                            pin.write(msg+'\n')
-                            # clear the line buffer
-                            msg = ''
+                        #elif c == '':
+                        #    print 'HERERERER'
+                        #    msg = msg[:-1]
+                        #    break
                         else:
-                            # append the data to our line buffer
-                            #print 'appending to buffer [%s]' % msg
-                            msg += c
+                            children = parent.children(recursive=False)
+                            if len(children) == 0: # echo back to client
+                                self.__write(c.replace('\n', '\r\n'))
+
+                            pin.write(c)
                             sys.stdout.flush()
-        
-                    elif r is process.stdout: # data arrived from terminal
-                        proc_response = process.stdout.readline()
+                            children = parent.children(recursive=False)
+                            self.__manager.get_io().echo(len(children) == 0)
+
+                    elif r in [process.stdout, process.stderr]: # data arrived from terminal
+                        max = 100
+                        def readAllSoFar(stream, max, retVal=''): 
+                            while (select([stream],[],[],0)[0]!=[] and len(retVal) <= max):  
+                                c = stream.read(1)
+                                if len(c) == 0:
+                                    break
+                                else:
+                                    retVal+=c
+                            return retVal
+                        proc_response = readAllSoFar(r, max)
+
+                        if len(proc_response) == 0:
+                            self.stop()
+                            break
+                        #print 'read bytes!'
+                        children = parent.children(recursive=False)
+                        #print 'has children ' + `len(children)`
+                        proc_response = proc_response.replace('\n', '\r\n')
+                        #print proc_response
                         self.__write('%s' % proc_response) #send only takes string
-                        # print proc_response,
+                        
+                        if len(proc_response) < max and len(children) == 0:
+                            self.__write(self.__generate_promptstring())
+                        
+                        time.sleep(0.005) # Hack currently to fix unknown race condition in CYW library preventing fast output
                         # sys.stderr.flush()
-                    elif r is process.stderr: # error arrived from terminal
-                        errmsg += process.stderr.read(1)
-                        if errmsg.endswith('>>> '):
-                            errmsg = errmsg[:-4]
-                        if errmsg.endswith('\n'):
-                            self.__write('%s' % errmsg)
-                            errmsg = ''        
+                    # elif r is process.stderr: # error arrived from terminal
+                    #     print 'reading from error!'
+                    #     errmsg += process.stderr.read(1)
+                    #     if len(errmsg) == 0:
+                    #         logger.info('Received CTRL^D, terminating terminal...')
+                    #         self.stop()
+                    #         break
+                    #     if errmsg.endswith('>>> '):
+                    #         errmsg = errmsg[:-4]
+                    #     if errmsg.endswith('\n'):
+                    #         self.__write('%s' % errmsg)
+                    #         errmsg = ''  
         except Exception as e:
             logger.error(traceback.format_exc())
+            
+        logger.info('Virtual Terminal has exited.')
         process.stdout.close()
         process.stderr.close()
+        process.terminate()
         self.__evt_stopping.set()
         
     """ Spawns the Linux `sh` process, captures its pipes, and creates a thread for routing I/O
@@ -133,9 +161,9 @@ class virtualterminal:
     def __write(self, text):
         self.__manager.get_io().write(text)
         
-    def write(self, message):
-        self.__write(self.__generate_promptstring())
-        self.pin.write(msg+'\r\n')
+    # def write(self, message):
+    #     self.__write(self.__generate_promptstring())
+    #     self.pin.write(msg+'\r\n')
         
     """ Constructs a Linux-bash style command prompt
     """
@@ -143,16 +171,17 @@ class virtualterminal:
         workdir = os.getcwd()
         if workdir == os.getenv('HOME'):
             workdir = "~"
-        return '%s@%s:%s# ' % (self.__manager.get_username(), platform.node(), workdir)    
+        return '\r\n%s@%s:%s# ' % (self.__manager.get_username(), platform.node(), workdir)    
     
     """ Writes a welcome message to the client transport
     """
     def __print_welcome(self):
         if os.path.isfile(WELCOME_MESSAGE_PATH):
+            logger.info('Sending welcome message from file: %s' % WELCOME_MESSAGE_PATH)
             self.__write('\n')
             with open(WELCOME_MESSAGE_PATH, "r") as welcome_file:
                 for line in welcome_file:
-                    self.__write(line + '\r\n')
+                    self.__write(line.strip('\n') + '\r\n')
             self.__write('\r\n\r\n')
             
         
