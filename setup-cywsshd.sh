@@ -10,6 +10,7 @@ exec > >(tee build-cywsshd.log)
 exec 2>&1
 
 pip install websocket-client
+pip install psutil
 
 # extract scripts to sbin
 #tar -xzvf cywsshd.tar.gz -C /usr/sbin/
