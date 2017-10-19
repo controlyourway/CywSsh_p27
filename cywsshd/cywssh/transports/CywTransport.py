@@ -5,6 +5,7 @@ import random
 import re
 import string
 import socket
+import time
 from ..client import *
 
 
@@ -43,8 +44,7 @@ class CywTransport:
 
     def connection_status_callback(self, connected):
         if connected:  # connection was successful
-            logger.info('Connection to ControlYourWay successful')
-            logger.info('Session ID: ' + str(self.__cyw.get_session_id()))
+            logger.info('Connection to ControlYourWay successful, Session ID: ' + str(self.__cyw.get_session_id()))
         else:
             logger.error('Unable to connect.')
             self.__cyw = None
@@ -53,22 +53,23 @@ class CywTransport:
         return ''.join(random.SystemRandom().choice(string.ascii_uppercase + string.digits) for _ in range(SESSION_KEY_LENGTH))
 
     def data_received_callback(self, data, data_type, from_who):
-        #print 'data received'
+        #print 'data received ' + data + " " + data_type
         data_type_match = re.match("^([^:]+)(:(.+))?$", data_type)
         split_data_type = data_type_match.group(1)
         if split_data_type == CYW_DT_CLOSE:
-            session_id = data_type_match.group(3)
+            secret = data_type_match.group(3)
             
-            existing_client = self.__server.client_by_session(session_id)
+            existing_client = self.__server.client_by_session(secret)
             
             if existing_client is None:
-                logger.warn('No clients for incoming message on session-id %s' % session_id)
+                logger.warn('No clients for incoming message on session-id %s' % secret)
             else:
                 logger.info('Client requested connection be closed...')
                 existing_client.stop()
 
         elif split_data_type == CYW_DT_DISCOVER_REQUEST:
             if data == self.__secret:
+                logger.info('Received discovery request')
                 # respond with discovery result
                 # 1. generate 20-byte unique key
                 new_session_key = self.generate_session_key()
@@ -89,30 +90,30 @@ class CywTransport:
                 self.__pending_session_keys.remove(data)
                 # 2. start a client instance for the new session-id
                 # logger.warn('No clients for incoming message on session-id %s' % session_id)
-                new_client = client(self.__server, CywTransport.IO(self.__cyw), data)
+                new_client = client(self.__server, CywTransport.IO(self.__cyw, data), data)
                 self.__server.add_client(new_client)
                 new_client.start()
             else:
                 logger.warn('Invalid session key %s' % data)
         elif split_data_type == CYW_DT_REQUEST:
-            session_id = data_type_match.group(3)
+            secret = data_type_match.group(3)
             
-            existing_client = self.__server.client_by_session(session_id)
+            existing_client = self.__server.client_by_session(secret)
             
             if existing_client is None:
-                logger.warn('No clients for incoming message on session-id %s' % session_id)
+                logger.warn('No clients for incoming message on session-id %s' % secret)
                 # return a disconnect message
                 try:
                     send_data = ControlYourWay_p27.CreateSendData()
                     send_data.data = ''
-                    send_data.data_type = CYW_DT_CLOSE
+                    send_data.data_type = CYW_DT_CLOSE + ':' + secret
                     if self.__cyw.connected:
                         self.__cyw.send_data(send_data)
                 except socket.error:
                     logger.error(traceback.format_exc())
                 
             else:
-                logger.debug('Incoming message on session-id %s' % session_id)
+                logger.debug('Incoming message on session-id %s' % secret)
                 existing_client.get_io().enqueue(data)
                 # echo back
                 #existing_client.get_io().write(data)
@@ -125,8 +126,9 @@ class CywTransport:
         echo_substitute = None
         __echo = False
         
-        def __init__(self, cyw):
+        def __init__(self, cyw, secret):
             self.__cyw = cyw
+            self.__secret = secret
             r, w = os.pipe()
             self.reader, self.__writer = os.fdopen(r, 'rU', 0), os.fdopen(w, 'w', 0)
             
@@ -193,7 +195,7 @@ class CywTransport:
             
         def close(self):
             # send disconnect notification to server
-            self.write('closing connection', data_type=CYW_DT_CLOSE)
+            self.write('closing connection', data_type=CYW_DT_CLOSE + ':' + self.__secret)
             self.reader.close()
             self.__writer.close()
             self.reader = None

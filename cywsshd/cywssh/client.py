@@ -153,6 +153,7 @@ class client:
                                     self.__io.write('Permission denied, please try again.\r\n')
                                 else:
                                     self.__io.write('Permission denied.\r\n')
+                                    break
                     except socket.timeout:
                         # explicitly exhaust the retry attempts
                         attempt = MAX_USERNAME_ATTEMPTS
