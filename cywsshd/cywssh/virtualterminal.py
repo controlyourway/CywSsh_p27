@@ -67,22 +67,20 @@ class virtualterminal:
                             self.__write('\r\n')
                             self.stop()
                             break
-                        # elif c == '':
-                        #     print 'HERERERER'
-                        #     pin.write(c)
-                        #     pin.write("\x1B[D")
-                            
-                        # #    msg = msg[:-1]
-                        #     break
                         else:
-                            children = parent.children(recursive=False)
+                            children = parent.children(recursive=True)
                             if len(children) == 0: # echo back to client
                                 self.__write(c.replace('\n', '\r\n'))
     
                             pin.write(c)
                             sys.stdout.flush()
-                            children = parent.children(recursive=False)
+
+                            children = parent.children(recursive=True)
                             self.__manager.get_io().echo(len(children) == 0)
+
+                            has_data = select([process.stdout, process.stderr],[],[],0)[0]!=[]
+                            if c == '\n' and not has_data and len(children) == 0:
+                                self.__write(self.__generate_promptstring())
     
                     elif r in [process.stdout, process.stderr]: # data arrived from terminal
                         max = 100
@@ -104,11 +102,13 @@ class virtualterminal:
                         #print 'has children ' + `len(children)`
                         proc_response = proc_response.replace('\n', '\r\n')
                         #print proc_response
+                        #print 'returning terminal response [%s]' % proc_response
+
                         self.__write('%s' % proc_response) #send only takes string
                         
                         if len(proc_response) < max and len(children) == 0:
                             self.__write(self.__generate_promptstring())
-                        
+
                         time.sleep(0.005) # Hack currently to fix unknown race condition in CYW library preventing fast output
                         # sys.stderr.flush()
                     # elif r is process.stderr: # error arrived from terminal
@@ -176,7 +176,7 @@ class virtualterminal:
         workdir = os.getcwd()
         if workdir == os.getenv('HOME'):
             workdir = "~"
-        return '\r\n%s@%s:%s# ' % (self.__manager.get_username(), platform.node(), workdir)    
+        return '%s@%s:%s# ' % (self.__manager.get_username(), platform.node(), workdir)    
     
     """ Writes a welcome message to the client transport
     """
