@@ -43,11 +43,11 @@ class CywTransport:
         self.__cyw.start()                
 
     def connection_status_callback(self, connected):
-        if connected:  # connection was successful
+        if connected and self.__cyw:  # connection was successful
             logger.info('Connection to ControlYourWay successful, Session ID: ' + str(self.__cyw.get_session_id()))
         else:
             logger.error('Unable to connect.')
-            self.__cyw = None
+            #self.__cyw = None
         
     def generate_session_key(self):
         return ''.join(random.SystemRandom().choice(string.ascii_uppercase + string.digits) for _ in range(SESSION_KEY_LENGTH))
